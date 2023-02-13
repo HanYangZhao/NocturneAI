@@ -130,7 +130,7 @@ def start(model: str, record_timeout: int, phrase_timeout: int, energy_threshold
     # Cue the user that we're ready to go.
     status = audio.edit_voice_settings(eleven_labs_api_key,voice_settings)
     if(status == 200):
-      print("Model loaded. Ready to start\n")
+      print("Model loaded. Ready to start. Ask Away! \n")
       print('', end='', flush=True)
 
     starting_text = "I am pretending to be " + artist + \
