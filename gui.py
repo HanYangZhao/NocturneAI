@@ -5,8 +5,10 @@ from time import sleep
 sg.theme("DarkBlue3")
 sg.set_options(font=("Courier New", 14))
 
+version = "0.1"
+
 layout = [
-  [sg.Text("Nocturne AI\n", justification="center", key="-TITLE-")],
+  [sg.Text("Nocturne AI " + version + "\n", justification="center", key="-TITLE-")],
   [
     sg.Text("Mic Threshold (150-3500):"),
     sg.Input("2000", size=(5, 1), justification="right", background_color="green", key="-MIC_THRESHOLD-")
@@ -54,7 +56,7 @@ layout = [
   [sg.Output(size=(100, 20), font="Courier 12")],
 ]
 
-window = sg.Window("Nocturne AI", layout, finalize=True)
+window = sg.Window("Nocturne AI " + version + "\n", layout, finalize=True)
 window["-TITLE-"].expand(expand_x=True)
 
 while True:
