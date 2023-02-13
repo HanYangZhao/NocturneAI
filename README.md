@@ -1,5 +1,5 @@
 # NocturneAI
-
+Nocturne AI is a voice-activated chatbot that offers a unique and personalized experience. With its combination of Whisper.ai, OpenAI's GPT-3, and ElevenLabs API, Nocturne AI is capable of emulating the personality and voice of the user's chosen individual, making each interaction feel like a real conversation with that person
 
 # Installation
 
