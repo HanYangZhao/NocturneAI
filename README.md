@@ -23,4 +23,7 @@ ELEVEN_LABS_API_KEY=YOUR_KEY
 ```
 
 # Run the program
-```python gui.py```
+```python main.py```
+
+# Build the program to an executable
+```pyinstaller main.spec```
