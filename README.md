@@ -10,9 +10,11 @@ Nocturne AI is a voice-activated chatbot that offers a unique and personalized e
 ### In PowerShell
 ```venv\Scripts\Activate.ps1```
 ### In Linux/MacOs
-```source myvenv/bin/activate```
+```source venv/bin/activate```
 
 ## Install packages
+For MacOs Only: ```brew install portaudio python-tk``` otherwise pyaduio install would fail.
+
 ```pip install -r requirements.txt```
 
 
