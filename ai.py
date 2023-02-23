@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 import io
 import speech_recognition as sr
 import whisper
+from whisper import _download, _MODELS
 import torch
 import warnings
 warnings.filterwarnings("ignore")
@@ -45,14 +46,14 @@ def generate_response_ai(prompt: str, gpt3_params: object):
 #phrase_timeout : "How much empty space between recordings before we consider it a new line in the transcription."
 
 
-def start(model: str, record_timeout: int, phrase_timeout: int, energy_threshold: int, artist: str, 
+def start(model_file_path: str, record_timeout: int, phrase_timeout: int, energy_threshold: int, artist: str, 
   gpt3_settings: object, voice_settings: object):
     """
     Start the Speech Regonition
 
     Parameters:
 
-    Model (str): tiny,base,small,medium
+    model_file_path (str): Model file path
     record_timeout(int): How real time the recording is in seconds.
     phrase_timeout(int): How many empty secs between recordings before we consider it a new line in the transcription.
     energy_threshold(int): Energy level for mic to detect (150-3500)
@@ -99,10 +100,12 @@ def start(model: str, record_timeout: int, phrase_timeout: int, energy_threshold
         source = sr.Microphone(sample_rate=16000)
 
     # Load / Download model
-    model = model
-    if model != "large":
-       model = model + ".en"
-    audio_model = whisper.load_model(model)
+    # model = model
+    # if model != "large":
+    #    model = model + ".en"
+    # _download(_MODELS[model], model_folder, False)
+    folder,file = os.path.split(model_file_path)
+    audio_model = whisper.load_model(file, download_root = os.path.basename(folder))
 
     record_timeout = record_timeout
     phrase_timeout = phrase_timeout

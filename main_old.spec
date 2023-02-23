@@ -1,15 +1,28 @@
 # -*- mode: python ; coding: utf-8 -*-
-
+from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import copy_metadata
+import sys ; sys.setrecursionlimit(sys.getrecursionlimit() * 5)
+datas = []
+datas += collect_data_files('torch')
+datas += collect_data_files('whisper')
+datas += copy_metadata('tqdm')
+datas += copy_metadata('regex')
+datas += copy_metadata('sacremoses')
+datas += copy_metadata('requests')
+datas += copy_metadata('packaging')
+datas += copy_metadata('filelock')
+datas += copy_metadata('numpy')
+datas += copy_metadata('tokenizers')
 
 block_cipher = None
 
 
 a = Analysis(
-    ['main.py'],
+    ['main.py', 'ai.py'],
     pathex=[],
     binaries=[],
-    datas=[],
-    hiddenimports=[],
+    datas=datas,
+    hiddenimports=['pytorch', 'pkg_resources.py2_warn', 'whisper'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -19,6 +32,9 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+
+#a.datas += Tree('./model', prefix='model')
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
@@ -26,7 +42,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='main',
+    name='NocturneAI',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -37,6 +53,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='Punch_Logo.ico'
+
 )
 coll = COLLECT(
     exe,
@@ -46,8 +64,9 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='main',
+    name='gui',
 )
+
 app = BUNDLE(
     coll,
     name='main.app',

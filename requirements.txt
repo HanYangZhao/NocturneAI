@@ -4,7 +4,7 @@ SpeechRecognition
 --extra-index-url https://download.pytorch.org/whl/cu116
 torch
 pysimplegui
-openai-whisper
+git+https://github.com/openai/whisper.git 
 python-dotenv
 pyaudio
 sacremoses

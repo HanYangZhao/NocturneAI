@@ -20,10 +20,11 @@ layout = [
     sg.Text("Phrase Timeout (secs):"),
     sg.Input("1", size=(2, 1), key="-PHRASE_TIMEOUT-",background_color="green"),
   ],
-  [
-    sg.Text("SR model size (tiny,base,small,medium,large) :"),
-    sg.Input("base", size=(7, 1), key="-MODEL_SIZE-",background_color="green"),
-  ],
+  # [
+  #   sg.Text("SR model size (tiny,base,small,medium,large) :"),
+  #   sg.Input("base", size=(7, 1), key="-MODEL_SIZE-",background_color="green"),
+  # ],
+  [[sg.Text('Speech Recog Model File'), sg.In(size=(25,1), enable_events=True ,key='-MODEL_FILE_PATH-'), sg.FilesBrowse()]],
   [
     sg.Text("GPT3 Model:"),
     sg.Input("text-davinci-003", size=(8, 1), key="-GPT3_MODEL-",background_color="green"),
@@ -68,7 +69,7 @@ while True:
     window["-MIC_THRESHOLD-"].update(disabled=True)
     window["-RECORD_TIME-"].update(disabled=True)
     window["-PHRASE_TIMEOUT-"].update(disabled=True)
-    window["-MODEL_SIZE-"].update(disabled=True)
+    window["-MODEL_FILE_PATH-"].update(disabled=True)
     window["-ARTIST-"].update(disabled=True)
     window["-GPT3_MODEL-"].update(disabled=True)
     window["-GPT3_TEMP-"].update(disabled=True)
@@ -81,7 +82,8 @@ while True:
     mic_threshold = int(values["-MIC_THRESHOLD-"])
     record_time = int(values["-RECORD_TIME-"])
     phrase_timeout = int(values["-PHRASE_TIMEOUT-"])
-    model_size = values["-MODEL_SIZE-"]
+    # model_size = values["-MODEL_SIZE-"]
+    model_file_path = values["-MODEL_FILE_PATH-"]
     artist = values["-ARTIST-"]
     gpt3_settings = {
       "model": values["-GPT3_MODEL-"],
@@ -95,6 +97,6 @@ while True:
       "stability": values["-VOICE_STABILITY-"],
       "similarity_boost": values["-VOICE_SIMILARITY_BOOST-"]
     }
-    threading.Thread(target=ai.start, args=(model_size,record_time,phrase_timeout,mic_threshold,artist,gpt3_settings,voice_settings), daemon=True).start()
+    threading.Thread(target=ai.start, args=(model_file_path,record_time,phrase_timeout,mic_threshold,artist,gpt3_settings,voice_settings), daemon=True).start()
 
   sleep(0.01)
