@@ -20,7 +20,6 @@ load_dotenv()
 openai.api_key = os.getenv('OPENAI_API_KEY')
 eleven_labs_api_key = os.getenv('ELEVEN_LABS_API_KEY')
 
-
 def generate_response_ai(prompt: str, gpt3_params: object):
     """
     Generate response from GPT3
@@ -46,7 +45,7 @@ def generate_response_ai(prompt: str, gpt3_params: object):
 #phrase_timeout : "How much empty space between recordings before we consider it a new line in the transcription."
 
 
-def start(model_file_path: str, record_timeout: int, phrase_timeout: int, energy_threshold: int, artist: str, 
+def start(model_file_path: str, record_timeout: int, phrase_timeout: int, energy_threshold: int, initial_prompt: str, 
   gpt3_settings: object, voice_settings: object):
     """
     Start the Speech Regonition
@@ -57,7 +56,7 @@ def start(model_file_path: str, record_timeout: int, phrase_timeout: int, energy
     record_timeout(int): How real time the recording is in seconds.
     phrase_timeout(int): How many empty secs between recordings before we consider it a new line in the transcription.
     energy_threshold(int): Energy level for mic to detect (150-3500)
-    artist(str): artist name
+    initial_prompt(str): initial_prompt
     gpt3_settings (obj): gpt3_settings
     voice_settings (obj): voice_settings
 
@@ -104,8 +103,11 @@ def start(model_file_path: str, record_timeout: int, phrase_timeout: int, energy
     # if model != "large":
     #    model = model + ".en"
     # _download(_MODELS[model], model_folder, False)
-    folder,file = os.path.split(model_file_path)
-    audio_model = whisper.load_model(file, download_root = os.path.basename(folder))
+    # folder,file = os.path.split(model_file_path)
+    # file = ".".join(file.split(".", 2)[:2]) #split the filename at the second ., take the first 2 elements then join them with .
+    # print(file)
+    audio_model = whisper.load_model(model_file_path, in_memory=True)
+    print("Model loaded. Ready to start. Ask Away! \n")
 
     record_timeout = record_timeout
     phrase_timeout = phrase_timeout
@@ -133,11 +135,12 @@ def start(model_file_path: str, record_timeout: int, phrase_timeout: int, energy
     # Cue the user that we're ready to go.
     status = audio.edit_voice_settings(eleven_labs_api_key,voice_settings)
     if(status == 200):
-      print("Model loaded. Ready to start. Ask Away! \n")
+      print("ElevenAI API connection success")
+      print('', end='', flush=True)
+    else:
+      print( "ElevenAI API connection failed: " +  str(status))
       print('', end='', flush=True)
 
-    starting_text = "I am pretending to be " + artist + \
-        ". If you ask me a question. I will give you the answer to the best of my abilities while being historically accurate.Limit your answer to 50 words."
     current_text = ""
     restart_sequence = "\n\n"
     while True:
@@ -193,7 +196,7 @@ def start(model_file_path: str, record_timeout: int, phrase_timeout: int, energy
                     start = time.time()
                     print("\nQ:" + text)
                     if not current_text:
-                        current_text = starting_text
+                        current_text = initial_prompt
                     prompt = current_text + restart_sequence + text
                     # print("")
                     # print("Prompt: " +  prompt)

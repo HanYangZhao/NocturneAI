@@ -5,3 +5,4 @@ venv
 dist
 build
 model
+.DS_Store

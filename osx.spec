@@ -33,18 +33,15 @@ a = Analysis(
     noarchive=False,
 )
 
-a.datas += Tree('./model', prefix='model')
+#a.datas += Tree('./model', prefix='model')
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
-    exclude_binaries=False,
+    exclude_binaries=True,
     name='NocturneAI',
     debug=False,
     bootloader_ignore_signals=False,
@@ -59,13 +56,32 @@ exe = EXE(
     icon='Punch_Logo.ico'
 
 )
-#coll = COLLECT(
-#    exe,
-#    a.binaries,
-#    a.zipfiles,
-#    a.datas,
-#    strip=False,
-#    upx=True,
-#    upx_exclude=[],
-#    name='gui',
-#)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='gui',
+)
+
+app = BUNDLE(
+    coll,
+    name='NocturneAI.app',
+    icon=None,
+    bundle_identifier="com.hanztech.nocturneai",
+    info_plist={
+        'NSPrincipalClass': 'NSApplication',
+        'NSAppleScriptEnabled': False,
+        "CFBundleDocumentTypes": [
+            {
+                "CFBundleTypeExtensions": ["pt"],
+                "CFBundleTypeName": "[pt]",
+                "CFBundleTypeRole": "Editor",
+                "CFBundleTypeOSTypes": ["****"],
+            }
+        ]
+    },
+)

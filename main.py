@@ -28,13 +28,13 @@ layout = [
   [
     sg.Text("GPT3 Model:"),
     sg.Input("text-davinci-003", size=(8, 1), key="-GPT3_MODEL-",background_color="green"),
-    sg.Text("Temp(0-1):"),
+    sg.Text("Temp(-2.0 to 2.0):"),
     sg.Input("0.8", size=(3, 1), key="-GPT3_TEMP-",background_color="green"),
     sg.Text("MaxTokens:"),
     sg.Input("100", size=(3, 1), key="-GPT3_MAX_TOKENS-",background_color="green"),
-    sg.Text("PresPenalty(0-1):"),
+    sg.Text("PresPenalty(-2.0 to 2.0):"),
     sg.Input("0.61", size=(3, 1), key="-GPT3_PRESENCE_PENALTY-",background_color="green"),
-    sg.Text("FreqPenalty(0-1):"),
+    sg.Text("FreqPenalty(-2.0 to 2.0):"),
     sg.Input("0.5", size=(3, 1), key="-GPT3_FREQUENCY_PENALTY-",background_color="green"),
   ],
   [
@@ -47,9 +47,8 @@ layout = [
 
   ],
   [
-
   ],
-  [sg.Text("Artist: "),sg.Input("Frederic Chopin", size=(15, 1), key="-ARTIST-",background_color="green"),],
+  [sg.Text("Initial Prompt: "),sg.Input("I'm impersonating Frederic Chopin. If you ask me a question. I will answer to the best of my abilities while being historically accurate.Limit your answer to 50 words.", size=(100, 2), key="-INITIAL_PROMPT-",background_color="green"),],
   [sg.Text("", size=(40, 1))],
   [sg.Button("Start")],
   [sg.Text("", size=(40, 1))],
@@ -70,7 +69,7 @@ while True:
     window["-RECORD_TIME-"].update(disabled=True)
     window["-PHRASE_TIMEOUT-"].update(disabled=True)
     window["-MODEL_FILE_PATH-"].update(disabled=True)
-    window["-ARTIST-"].update(disabled=True)
+    window["-INITIAL_PROMPT-"].update(disabled=True)
     window["-GPT3_MODEL-"].update(disabled=True)
     window["-GPT3_TEMP-"].update(disabled=True)
     window["-GPT3_MAX_TOKENS-"].update(disabled=True)
@@ -84,7 +83,7 @@ while True:
     phrase_timeout = int(values["-PHRASE_TIMEOUT-"])
     # model_size = values["-MODEL_SIZE-"]
     model_file_path = values["-MODEL_FILE_PATH-"]
-    artist = values["-ARTIST-"]
+    initial_prompt = values["-INITIAL_PROMPT-"]
     gpt3_settings = {
       "model": values["-GPT3_MODEL-"],
       "temp": values["-GPT3_TEMP-"],
@@ -97,6 +96,6 @@ while True:
       "stability": values["-VOICE_STABILITY-"],
       "similarity_boost": values["-VOICE_SIMILARITY_BOOST-"]
     }
-    threading.Thread(target=ai.start, args=(model_file_path,record_time,phrase_timeout,mic_threshold,artist,gpt3_settings,voice_settings), daemon=True).start()
+    threading.Thread(target=ai.start, args=(model_file_path,record_time,phrase_timeout,mic_threshold,initial_prompt,gpt3_settings,voice_settings), daemon=True).start()
 
   sleep(0.01)
