@@ -18,7 +18,7 @@ def edit_voice_settings(api_key : str,settings: object):
   eleven_labs_url = eleven_labs_base_url + "/v1/voices/" + settings['id'] + "/settings/edit"
   json = {
     "stability": settings['stability'],
-    "similarity_boost": settings['similarity_boost']
+    "similarity_boost": settings['similarity_boost'],
   }
   r = post_request(eleven_labs_url,api_key,json)
   return r.status_code
@@ -34,18 +34,30 @@ def generate_voice(api_key: str, settings: object, text: str):
   text (str) : Text to generate voice from
   return: null
   """
-  eleven_labs_url = eleven_labs_base_url + "/v1/text-to-speech/" + settings['id'] + "/stream"
+  eleven_labs_url = eleven_labs_base_url + "/v1/text-to-speech/" + settings['id'] + "/stream?optimize_streaming_latency=1&output_format=mp3_44100_128"
   start = time.time()
   json = {
     "text": text,
-    "model_id": settings['id'],
-    "language_id": "english"
+    "model_id": "eleven_multilingual_v2",
+    "language_id": "english",
+    "voice_settings": {
+      "stability": settings['stability'],
+      "similarity_boost": settings['similarity_boost'],
+      "style": settings['style'],
+      "use_speaker_boost": settings['use_speaker_boost']
+    }
   }
-  response = post_request(eleven_labs_url,api_key,json)
-  audio = AudioSegment.from_file(io.BytesIO(response.content), format="mp3")
-  end = time.time()
-  print("audio generation(secs):" + str(end - start))
-  play(audio)
+
+  try: 
+    response = post_request(eleven_labs_url,api_key,json)
+    response.raise_for_status()
+  except requests.exceptions.HTTPError as err:
+    print("Eleven Labs API error: " + str(err))
+  else:
+    audio = AudioSegment.from_file(io.BytesIO(response.content), format="mp3")
+    end = time.time()
+    print("audio generation(secs):" + str(end - start))
+    play(audio)
 
 
 def post_request(url,api_key,json):

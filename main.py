@@ -26,7 +26,7 @@ layout = [
   # ],
   [[sg.Text('Speech Recog Model File'), sg.In(size=(25,1), enable_events=True ,key='-MODEL_FILE_PATH-'), sg.FilesBrowse()]],
   [
-    sg.Text("GPT3 Model:"),
+    sg.Text("GPT Model:"),
     sg.Input("text-davinci-003", size=(8, 1), key="-GPT3_MODEL-",background_color="green"),
     sg.Text("Temp(-2.0 to 2.0):"),
     sg.Input("0.8", size=(3, 1), key="-GPT3_TEMP-",background_color="green"),
@@ -94,7 +94,9 @@ while True:
     voice_settings = {
       "id": values["-VOICE_ID-"],
       "stability": values["-VOICE_STABILITY-"],
-      "similarity_boost": values["-VOICE_SIMILARITY_BOOST-"]
+      "similarity_boost": values["-VOICE_SIMILARITY_BOOST-"],
+      "style": 0.1,
+      "use_speaker_boost": False
     }
     threading.Thread(target=ai.start, args=(model_file_path,record_time,phrase_timeout,mic_threshold,initial_prompt,gpt3_settings,voice_settings), daemon=True).start()
 
