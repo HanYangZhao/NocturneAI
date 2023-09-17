@@ -1,7 +1,13 @@
+import os
+import sys
+if getattr(sys, 'frozen', False):
+    # If we are, add the path to the FFmpeg binary in the bundle to the system's PATH
+    os.environ['PATH'] = sys._MEIPASS + os.pathsep + os.environ['PATH']
+
+
 import time
 from dotenv import load_dotenv
 import audio
-import os
 import openai
 from sys import platform
 from time import sleep
@@ -107,7 +113,7 @@ def start(model_file_path: str, record_timeout: int, phrase_timeout: int, energy
     # file = ".".join(file.split(".", 2)[:2]) #split the filename at the second ., take the first 2 elements then join them with .
     # print(file)
     audio_model = whisper.load_model(model_file_path, in_memory=True)
-    print("Model loaded. Ready to start. Ask Away! \n")
+    print(" (1/2) Model loaded. Ready to start. Ask Away! \n")
 
     record_timeout = record_timeout
     phrase_timeout = phrase_timeout
@@ -135,7 +141,7 @@ def start(model_file_path: str, record_timeout: int, phrase_timeout: int, energy
     # Cue the user that we're ready to go.
     status = audio.edit_voice_settings(eleven_labs_api_key,voice_settings)
     if(status == 200):
-      print("ElevenAI API connection success")
+      print("(2/2) ElevenAI API connection success")
       print('', end='', flush=True)
     else:
       print( "ElevenAI API connection failed: " +  str(status))
@@ -195,7 +201,6 @@ def start(model_file_path: str, record_timeout: int, phrase_timeout: int, energy
                 if text:
                     start = time.time()
                     print("\nQ:" + text)
-                    print(current_text)
                     if len(current_text) < 1:
                         current_text = [{"role": "system", "content": initial_prompt}]
                     current_text.append({"role": "user", "content": text})

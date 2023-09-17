@@ -13,14 +13,15 @@ datas += copy_metadata('packaging')
 datas += copy_metadata('filelock')
 datas += copy_metadata('numpy')
 datas += copy_metadata('tokenizers')
-
 block_cipher = None
 
 
 a = Analysis(
     ['main.py', 'ai.py'],
     pathex=[],
-    binaries=[],
+    binaries=[('/usr/local/bin/ffmpeg', '.'),
+    ('/usr/local/opt/libarchive/lib/libarchive.13.dylib', '.'),
+    ('/usr/local/bin/ffprobe','.')],
     datas=datas,
     hiddenimports=['pytorch', 'pkg_resources.py2_warn', 'whisper'],
     hookspath=[],
@@ -33,7 +34,7 @@ a = Analysis(
     noarchive=False,
 )
 
-#a.datas += Tree('./model', prefix='model')
+a.datas += Tree('./model', prefix='model')
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
@@ -73,6 +74,7 @@ app = BUNDLE(
     icon=None,
     bundle_identifier="com.hanztech.nocturneai",
     info_plist={
+        'NSMicrophoneUsageDescription':'Reason for microphone access',
         'NSPrincipalClass': 'NSApplication',
         'NSAppleScriptEnabled': False,
         "CFBundleDocumentTypes": [
