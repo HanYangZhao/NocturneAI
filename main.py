@@ -27,7 +27,7 @@ layout = [
   [[sg.Text('Speech Recog Model File'), sg.In(size=(25,1), enable_events=True ,key='-MODEL_FILE_PATH-'), sg.FilesBrowse()]],
   [
     sg.Text("GPT Model:"),
-    sg.Input("text-davinci-003", size=(8, 1), key="-GPT3_MODEL-",background_color="green"),
+    sg.Input("gpt-3.5-turbo", size=(8, 1), key="-GPT3_MODEL-",background_color="green"),
     sg.Text("Temp(-2.0 to 2.0):"),
     sg.Input("0.8", size=(3, 1), key="-GPT3_TEMP-",background_color="green"),
     sg.Text("MaxTokens:"),
