@@ -4,6 +4,7 @@ import io
 import requests
 import time
 
+one_second_silence = AudioSegment.silent(duration=500)
 eleven_labs_base_url = "https://api.elevenlabs.io"
 
 def edit_voice_settings(api_key : str,settings: object):
@@ -57,7 +58,8 @@ def generate_voice(api_key: str, settings: object, text: str):
     audio = AudioSegment.from_file(io.BytesIO(response.content), format="mp3")
     end = time.time()
     print("audio generation(secs):" + str(end - start))
-    play(audio)
+    combined = audio.append(one_second_silence, crossfade=250)
+    play(combined)
 
 
 def post_request(url,api_key,json):

@@ -7,7 +7,7 @@ from time import sleep
 sg.theme("DarkBlue3")
 sg.set_options(font=("Courier New", 14))
 
-version = "0.1"
+version = "0.2"
 
 import sys, os
 # Check if we're running in a PyInstaller bundle
