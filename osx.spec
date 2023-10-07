@@ -20,6 +20,7 @@ a = Analysis(
     ['main.py', 'ai.py'],
     pathex=[],
     binaries=[('/usr/local/bin/ffmpeg', '.'),
+    ('/usr/local/bin/ffplay', '.'),
     ('/usr/local/opt/libarchive/lib/libarchive.13.dylib', '.'),
     ('/usr/local/lib/libFLAC++.10.dylib', '.'),
     ('/usr/local/lib/libFLAC++.dylib', '.'),

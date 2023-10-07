@@ -217,14 +217,15 @@ def start(model_file_path: str, record_timeout: int, phrase_timeout: int, energy
                     # if ':' in response_text:
                     #     response_text = response_text.split(":")[1]
                     current_text.append({"role": "assistant", "content": response_text})
+                    print("\nA : " + str(response_text.encode('utf-8')))
+                    print("total token: " +
+                          str(r['usage']['total_tokens']) + "\n")
                     isVoicePlayback = True
                     audio.generate_voice(eleven_labs_api_key, voice_settings, response_text)
                     sleep(0.1)
                     isVoicePlayback = False
                     print("response generation(secs):" + str(end - start))
-                    print("\nA : " + str(response_text.encode('utf-8')))
-                    print("total token: " +
-                          str(r['usage']['total_tokens']) + "\n")
+
                     data_queue.queue.clear()
                 sleep(0.01)
         except KeyboardInterrupt:

@@ -3,6 +3,7 @@ from pydub.playback import play
 import io
 import requests
 import time
+import subprocess
 
 one_second_silence = AudioSegment.silent(duration=500)
 eleven_labs_base_url = "https://api.elevenlabs.io"
@@ -35,11 +36,12 @@ def generate_voice(api_key: str, settings: object, text: str):
   text (str) : Text to generate voice from
   return: null
   """
-  eleven_labs_url = eleven_labs_base_url + "/v1/text-to-speech/" + settings['id'] + "/stream?optimize_streaming_latency=1&output_format=mp3_44100_128"
+  eleven_labs_url = eleven_labs_base_url + "/v1/text-to-speech/" + settings['id'] + "/stream?optimize_streaming_latency=2&output_format=mp3_44100_128"
   start = time.time()
+  #eleven_monolingual_v1 is faster but eleven_multilingual_v2 might be faster
   json = {
     "text": text,
-    "model_id": "eleven_multilingual_v2",
+    "model_id": "eleven_monolingual_v1",
     "language_id": "english",
     "voice_settings": {
       "stability": settings['stability'],
@@ -54,12 +56,20 @@ def generate_voice(api_key: str, settings: object, text: str):
     response.raise_for_status()
   except requests.exceptions.HTTPError as err:
     print("Eleven Labs API error: " + str(err))
+    
   else:
-    audio = AudioSegment.from_file(io.BytesIO(response.content), format="mp3")
-    end = time.time()
-    print("audio generation(secs):" + str(end - start))
-    combined = audio.append(one_second_silence, crossfade=250)
-    play(combined)
+    ffplay_cmd = ['ffplay', '-autoexit', '-nodisp', '-']
+    ffplay_proc = subprocess.Popen(ffplay_cmd, stdin=subprocess.PIPE)
+    isAudioReceived = False
+    for chunk in response.iter_content(chunk_size=4096):
+        ffplay_proc.stdin.write(chunk)
+        if(not isAudioReceived):
+          end = time.time()
+          print("audio generation(secs):" + str(end - start))
+          isAudioReceived = True
+    ffplay_proc.stdin.close()
+    ffplay_proc.wait()
+
 
 
 def post_request(url,api_key,json):
