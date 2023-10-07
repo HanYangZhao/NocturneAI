@@ -1,7 +1,13 @@
+import os
+import sys
+if getattr(sys, 'frozen', False):
+    # If we are, add the path to the FFmpeg binary in the bundle to the system's PATH
+    os.environ['PATH'] = sys._MEIPASS + os.pathsep + os.environ['PATH']
+
+
 import time
 from dotenv import load_dotenv
 import audio
-import os
 import openai
 from sys import platform
 from time import sleep
@@ -20,7 +26,7 @@ load_dotenv()
 openai.api_key = os.getenv('OPENAI_API_KEY')
 eleven_labs_api_key = os.getenv('ELEVEN_LABS_API_KEY')
 
-def generate_response_ai(prompt: str, gpt3_params: object):
+def generate_response_ai(message: str, gpt3_params: object):
     """
     Generate response from GPT3
 
@@ -31,9 +37,9 @@ def generate_response_ai(prompt: str, gpt3_params: object):
 
     return: GPT3 reponse
     """
-    response = openai.Completion.create(
+    response = openai.ChatCompletion.create(
         model=gpt3_params['model'],
-        prompt=prompt,
+        messages=message,
         temperature=float(gpt3_params['temp']),
         max_tokens=int(gpt3_params['max_tokens']),
         top_p=1,
@@ -79,6 +85,7 @@ def start(model_file_path: str, record_timeout: int, phrase_timeout: int, energy
     recorder.energy_threshold = energy_threshold
     # Definitely do this, dynamic energy compensation lowers the energy threshold dramtically to a point where the SpeechRecognizer never stops recording.
     recorder.dynamic_energy_threshold = False
+    isVoicePlayback = False
 
     # Important for linux users.
     # Prevents permanent application hang and crash by using the wrong Microphone
@@ -107,7 +114,7 @@ def start(model_file_path: str, record_timeout: int, phrase_timeout: int, energy
     # file = ".".join(file.split(".", 2)[:2]) #split the filename at the second ., take the first 2 elements then join them with .
     # print(file)
     audio_model = whisper.load_model(model_file_path, in_memory=True)
-    print("Model loaded. Ready to start. Ask Away! \n")
+    print(" (1/2) Model loaded. Ready to start. Ask Away! \n")
 
     record_timeout = record_timeout
     phrase_timeout = phrase_timeout
@@ -125,7 +132,8 @@ def start(model_file_path: str, record_timeout: int, phrase_timeout: int, energy
       """
       # Grab the raw bytes and push it into the thread safe queue.
       data = audio.get_raw_data()
-      data_queue.put(data)
+      if(not isVoicePlayback):
+        data_queue.put(data)
 
     # Create a background thread that will pass us raw audio bytes.
     # We could do this manually but SpeechRecognizer provides a nice helper.
@@ -135,13 +143,13 @@ def start(model_file_path: str, record_timeout: int, phrase_timeout: int, energy
     # Cue the user that we're ready to go.
     status = audio.edit_voice_settings(eleven_labs_api_key,voice_settings)
     if(status == 200):
-      print("ElevenAI API connection success")
+      print("(2/2) ElevenAI API connection success")
       print('', end='', flush=True)
     else:
       print( "ElevenAI API connection failed: " +  str(status))
       print('', end='', flush=True)
 
-    current_text = ""
+    current_text = []
     restart_sequence = "\n\n"
     while True:
         try:
@@ -195,26 +203,30 @@ def start(model_file_path: str, record_timeout: int, phrase_timeout: int, energy
                 if text:
                     start = time.time()
                     print("\nQ:" + text)
-                    if not current_text:
-                        current_text = initial_prompt
-                    prompt = current_text + restart_sequence + text
+                    if len(current_text) < 1:
+                        current_text = [{"role": "system", "content": initial_prompt}]
+                    current_text.append({"role": "user", "content": text})
                     # print("")
                     # print("Prompt: " +  prompt)
                     # print("")
-                    r = generate_response_ai(prompt, gpt3_settings)
+                    r = generate_response_ai(current_text, gpt3_settings)
                     end = time.time()
 
-                    response_text = r['choices'][0]['text']
-                    # if if '(' in my_string:
-                    if ':' in response_text:
-                        response_text = response_text.split(":")[1]
-                    current_text = current_text + response_text
-                    audio.generate_voice(
-                         eleven_labs_api_key, voice_settings, response_text)
-                    print("response generation(secs):" + str(end - start))
+                    response_text = r['choices'][0]['message']['content']
+                    # # if if '(' in my_string:
+                    # if ':' in response_text:
+                    #     response_text = response_text.split(":")[1]
+                    current_text.append({"role": "assistant", "content": response_text})
                     print("\nA : " + str(response_text.encode('utf-8')))
                     print("total token: " +
                           str(r['usage']['total_tokens']) + "\n")
+                    isVoicePlayback = True
+                    audio.generate_voice(eleven_labs_api_key, voice_settings, response_text)
+                    sleep(0.1)
+                    isVoicePlayback = False
+                    print("response generation(secs):" + str(end - start))
+
+                    data_queue.queue.clear()
                 sleep(0.01)
         except KeyboardInterrupt:
             break

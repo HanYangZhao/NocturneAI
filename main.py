@@ -1,11 +1,25 @@
 import PySimpleGUI as sg
 import ai
 import threading
+import sys
+import os
 from time import sleep
 sg.theme("DarkBlue3")
 sg.set_options(font=("Courier New", 14))
 
-version = "0.1"
+version = "0.3_faster_model"
+
+import sys, os
+# Check if we're running in a PyInstaller bundle
+if getattr(sys, 'frozen', False):
+    # If we are, use the path in the bundle
+    base_path = sys._MEIPASS
+else:
+    # If we're not, use the path of the script
+    base_path = os.path.dirname(__file__)
+  
+model_path = os.path.join(base_path, 'model')
+model_files = os.listdir(model_path)
 
 layout = [
   [sg.Text("Nocturne AI " + version + "\n", justification="center", key="-TITLE-")],
@@ -24,10 +38,11 @@ layout = [
   #   sg.Text("SR model size (tiny,base,small,medium,large) :"),
   #   sg.Input("base", size=(7, 1), key="-MODEL_SIZE-",background_color="green"),
   # ],
-  [[sg.Text('Speech Recog Model File'), sg.In(size=(25,1), enable_events=True ,key='-MODEL_FILE_PATH-'), sg.FilesBrowse()]],
+  [[sg.Text('Select a Speech Reconigtion model file:')],
+          [sg.Combo(model_files, key='-MODEL_FILE_PATH-', default_value='tiny.pt')]],
   [
     sg.Text("GPT Model:"),
-    sg.Input("text-davinci-003", size=(8, 1), key="-GPT3_MODEL-",background_color="green"),
+    sg.Input("gpt-3.5-turbo", size=(8, 1), key="-GPT3_MODEL-",background_color="green"),
     sg.Text("Temp(-2.0 to 2.0):"),
     sg.Input("0.8", size=(3, 1), key="-GPT3_TEMP-",background_color="green"),
     sg.Text("MaxTokens:"),
@@ -82,7 +97,7 @@ while True:
     record_time = int(values["-RECORD_TIME-"])
     phrase_timeout = int(values["-PHRASE_TIMEOUT-"])
     # model_size = values["-MODEL_SIZE-"]
-    model_file_path = values["-MODEL_FILE_PATH-"]
+    model_file_path = model_path + '/' + values["-MODEL_FILE_PATH-"]
     initial_prompt = values["-INITIAL_PROMPT-"]
     gpt3_settings = {
       "model": values["-GPT3_MODEL-"],
