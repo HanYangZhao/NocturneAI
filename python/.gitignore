@@ -1,0 +1,8 @@
+.env
+__pycache__
+*.mp3
+venv
+dist
+build
+model
+.DS_Store
