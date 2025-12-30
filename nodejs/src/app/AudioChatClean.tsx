@@ -1,10 +1,95 @@
-"use client";
 
-import React, { useEffect, useRef, useState } from "react";
-import logger from "./logger";
-import { Scribe, RealtimeEvents, AudioFormat, CommitStrategy } from "@elevenlabs/client";
+
+  "use client";
+
+  import React, { useEffect, useRef, useState } from "react";
+  import logger from "./logger";
+  import { RealtimeEvents, CommitStrategy } from "@elevenlabs/client";
+  import { ScribeRealtime as Scribe } from "./scribe/scribe";
 
 export default function AudioChatClean() {
+    const [micMuted, setMicMuted] = useState(false);
+  // --- TTS and mic helpers (must be inside component for refs) ---
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  function muteMic() {
+    const micStream = connectionRef.current?._microphoneStream;
+    if (micStream && micStream.getAudioTracks().length > 0) {
+      micStream.getAudioTracks().forEach((track) => (track.enabled = false));
+      setMicMuted(true);
+    } else {
+      logger.warn('No Scribe microphone stream to mute.');
+      setMicMuted(true); // UI feedback only
+    }
+  }
+  function unmuteMic() {
+    const micStream = connectionRef.current?._microphoneStream;
+    if (micStream && micStream.getAudioTracks().length > 0) {
+      micStream.getAudioTracks().forEach((track) => (track.enabled = true));
+      setMicMuted(false);
+    } else {
+      logger.warn('No Scribe microphone stream to unmute.');
+      setMicMuted(false); // UI feedback only
+    }
+  }
+  // Play TTS audio for assistant response using <audio> element for reliability
+  async function playAssistantTTS(text: string) {
+    logger.info('[TTS] playAssistantTTS called with text:', text);
+    if (!text || !text.trim()) {
+      logger.debug('[TTS] No text provided, skipping playback');
+      return;
+    }
+    try {
+      muteMic();
+      logger.debug('[TTS] Mic muted, sending request to /api/tts');
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      logger.debug('[TTS] /api/tts response status:', res.status);
+      if (!res.ok) throw new Error('TTS request failed');
+      const audioData = await res.arrayBuffer();
+      logger.debug('[TTS] Received audio data, byteLength:', audioData.byteLength);
+      const blob = new Blob([audioData], { type: 'audio/mpeg' });
+      const url = URL.createObjectURL(blob);
+      logger.debug('[TTS] Created audio blob and object URL:', url);
+      if (audioRef.current) {
+        logger.debug('[TTS] Using <audio> element for playback');
+        audioRef.current.src = url;
+        audioRef.current.onended = () => {
+          logger.debug('[TTS] <audio> playback ended, revoking URL and unmuting mic');
+          URL.revokeObjectURL(url);
+          unmuteMic();
+        };
+        try {
+          await audioRef.current.play();
+          logger.debug('[TTS] <audio> playback started');
+        } catch (err) {
+          logger.error('[TTS] <audio> playback error', err);
+          unmuteMic();
+        }
+      } else {
+        logger.debug('[TTS] <audio> ref missing, using fallback Audio()');
+        const audio = new Audio(url);
+        audio.onended = () => {
+          logger.debug('[TTS] fallback Audio() playback ended, revoking URL and unmuting mic');
+          URL.revokeObjectURL(url);
+          unmuteMic();
+        };
+        try {
+          await audio.play();
+          logger.debug('[TTS] fallback Audio() playback started');
+        } catch (err) {
+          logger.error('[TTS] fallback Audio() playback error', err);
+          unmuteMic();
+        }
+      }
+    } catch (err) {
+      logger.error('[TTS] playback error', err);
+      unmuteMic();
+    }
+  }
+
   const [connected, setConnected] = useState(false);
   const [elStatus, setElStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [oaiStatus, setOaiStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
@@ -26,6 +111,15 @@ export default function AudioChatClean() {
     setElStatus('connecting');
     setOaiStatus('connecting');
     try {
+      // Get local mic stream for mute/unmute control
+      if (!localStreamRef.current) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          localStreamRef.current = stream;
+        } catch (err) {
+          logger.error("Failed to get user media for mic control", err);
+        }
+      }
       // Start ElevenLabs connection
       const tokenRes = await fetch("/api/stt/elevenlabs-token");
       const tokenJson = await tokenRes.json();
@@ -38,14 +132,15 @@ export default function AudioChatClean() {
         languageCode: "en",
         commitStrategy: CommitStrategy.VAD,
         vadSilenceThresholdSecs: 1.5,
-        vadThreshold: 0.4,
-        minSpeechDurationMs: 100,
-        minSilenceDurationMs: 100,
+        vadThreshold: 0.5,
+        minSpeechDurationMs: 250,
+        minSilenceDurationMs: 250,
         includeTimestamps: false,
         microphone: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
+          stream: localStreamRef.current,
         },
       });
       connectionRef.current = connection;
@@ -188,10 +283,14 @@ export default function AudioChatClean() {
         if (msg.type === "response.refusal.delta") {
           appendAssistant("\n[refusal] ");
         }
-        if (msg.type === "response.completed") {
-          logger.info("OpenAI response completed", msg);
+        if (msg.type === "response.done") {
+          logger.info("OpenAI response done", msg);
           // On completion, push the full assistant response to transcript history
           appendAssistant("", true);
+          const finalResponse = assistantResponseRef.current?.trim();
+          if (finalResponse) {
+            playAssistantTTS(finalResponse);
+          }
           // clear assistant output after a short delay so the UI resets for next response
           setTimeout(() => {
             assistantResponseRef.current = "";
@@ -302,7 +401,9 @@ export default function AudioChatClean() {
     const next = cur + text;
     assistantResponseRef.current = next;
     setAssistantResponse(next);
-    // If done, push to transcript history
+    // If done, push to transcript history and play TTS
+    logger.debug(done)
+    logger.debug(next.trim())
     if (done && next.trim()) {
       setTranscriptHistory((h) => [...h, { role: "assistant", text: next.trim() }]);
     }
@@ -379,8 +480,20 @@ export default function AudioChatClean() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-6 p-8">
+      {/* Hidden audio element for TTS playback */}
+      <audio ref={audioRef} style={{ display: 'none' }} />
       <h1 className="text-2xl font-bold">Nocturne AI</h1>
       <div className="w-full max-w-xl bg-white p-4 rounded shadow">
+        <div className="flex gap-2 mb-2">
+          <button
+            onClick={micMuted ? unmuteMic : muteMic}
+            className={`px-3 py-1 rounded ${micMuted ? 'bg-gray-400 text-white' : 'bg-blue-600 text-white'}`}
+            disabled={!connected}
+          >
+            {micMuted ? 'Unmute Mic' : 'Mute Mic'}
+          </button>
+          <span className={`text-sm ${micMuted ? 'text-red-600' : 'text-green-600'}`}>{micMuted ? 'Mic is muted' : 'Mic is live'}</span>
+        </div>
         <div className="flex gap-3 items-center">
           <button onClick={startRealtime} disabled={connected || elStatus === 'connecting' || oaiStatus === 'connecting'} className="px-4 py-2 bg-green-600 text-white rounded">Start Session</button>
           <button onClick={stopRealtime} disabled={!connected} className="px-4 py-2 bg-red-500 text-white rounded">Stop Session</button>

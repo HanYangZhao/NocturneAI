@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   // Use the SDK to stream and collect audio chunks
   try {
     const audioStream = await client.textToSpeech.stream(voiceId, {
-      modelId: "eleven_multilingual_v2",
+      modelId: "eleven_flash_v2_5",
       text,
       outputFormat: "mp3_44100_128",
     });
