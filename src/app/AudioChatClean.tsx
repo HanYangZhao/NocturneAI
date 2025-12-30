@@ -84,8 +84,10 @@ export default function AudioChatClean() {
         const dest = outDestinationRef.current || ac.createMediaStreamDestination();
         outDestinationRef.current = dest;
         src.connect(dest);
-        // also connect to destination to keep audio playing through context's destination (optional)
-        try { src.connect(ac.destination); } catch (e) {}
+        // Do not connect to AudioContext destination to avoid duplicate playback.
+        // The buffer is routed to a MediaStreamDestination and played via the
+        // hidden audio element (`graphAudioRef`). Connecting to `ac.destination`
+        // would play the same audio twice.
         src.start();
         logger.debug('[TTS] Playing decoded buffer via AudioContext');
         // When finished, unmute mic
@@ -693,6 +695,29 @@ export default function AudioChatClean() {
           </span>
         </div>
         <div className="mt-3">
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <label className="block text-sm font-medium mb-1">Output device</label>
+              <select
+                value={selectedOutputId}
+                onChange={async (e) => {
+                  const id = e.target.value;
+                  await applySelectedOutput(id);
+                }}
+                onClick={() => refreshAudioOutputs()}
+                className="p-2 border rounded text-sm mr-2"
+              >
+                {audioOutputs.length === 0 ? <option value="default">default</option> : null}
+                {audioOutputs.map((o) => (
+                  <option key={o.deviceId} value={o.deviceId}>{o.label || o.deviceId}</option>
+                ))}
+              </select>
+              <button onClick={() => refreshAudioOutputs()} className="text-xs text-blue-600 ml-2">Refresh</button>
+              {!supportsSetSinkId ? (
+                <div className="text-xs text-gray-500 mt-1">Note: Browser may not support per-tab output. Use system output or Chromium.</div>
+              ) : null}
+            </div>
+          </div>
           <label className="block text-sm font-medium mb-1">API Password</label>
           <input
             type="password"
@@ -733,27 +758,7 @@ export default function AudioChatClean() {
             <strong>Assistant Response</strong>
             <div className="min-h-[48px] mt-2 p-2 border rounded bg-gray-50 whitespace-pre-wrap">{assistantResponse || <span className="text-gray-400">(no response)</span>}</div>
           </div>
-          <div className="flex flex-col items-end gap-2">
-            <label className="text-sm">Output device</label>
-            <select
-              value={selectedOutputId}
-              onChange={async (e) => {
-                const id = e.target.value;
-                await applySelectedOutput(id);
-              }}
-              onClick={() => refreshAudioOutputs()}
-              className="p-1 border rounded text-sm"
-            >
-              {audioOutputs.length === 0 ? <option value="default">default</option> : null}
-              {audioOutputs.map((o) => (
-                <option key={o.deviceId} value={o.deviceId}>{o.label || o.deviceId}</option>
-              ))}
-            </select>
-            <button onClick={() => refreshAudioOutputs()} className="text-xs text-blue-600">Refresh</button>
-            {!supportsSetSinkId ? (
-              <div className="text-xs text-gray-500 mt-1">Note: Browser may not support per-tab output. Use system output or Chromium.</div>
-            ) : null}
-          </div>
+          {/* audio output selector removed from here and relocated to top settings for convenience */}
         </div>
       </div>
       <div className="w-full max-w-xl bg-white p-4 rounded shadow mt-4">
