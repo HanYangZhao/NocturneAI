@@ -8,6 +8,16 @@
   import { ScribeRealtime as Scribe } from "./scribe/scribe";
 
 export default function AudioChatClean() {
+      // Stop TTS audio playback
+      function stopTTSPlayback() {
+        if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current.currentTime = 0;
+          audioRef.current.src = "";
+          logger.info('[TTS] Audio playback stopped by user');
+          unmuteMic();
+        }
+      }
     const [micMuted, setMicMuted] = useState(false);
   // --- TTS and mic helpers (must be inside component for refs) ---
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -491,6 +501,13 @@ export default function AudioChatClean() {
             disabled={!connected}
           >
             {micMuted ? 'Unmute Mic' : 'Mute Mic'}
+          </button>
+          <button
+            onClick={stopTTSPlayback}
+            className="px-3 py-1 rounded bg-red-400 text-white"
+            disabled={!connected}
+          >
+            Stop Audio
           </button>
           <span className={`text-sm ${micMuted ? 'text-red-600' : 'text-green-600'}`}>{micMuted ? 'Mic is muted' : 'Mic is live'}</span>
         </div>
