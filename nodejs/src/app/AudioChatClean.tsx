@@ -1,0 +1,415 @@
+"use client";
+
+import React, { useEffect, useRef, useState } from "react";
+import { Scribe, RealtimeEvents, AudioFormat, CommitStrategy } from "@elevenlabs/client";
+
+export default function AudioChatClean() {
+  const [connected, setConnected] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const [partialTranscript, setPartialTranscript] = useState("");
+  const [transcriptHistory, setTranscriptHistory] = useState<string[]>([]);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const connectionRef = useRef<any | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const dcRef = useRef<any | null>(null);
+  const instructionSentRef = useRef<boolean>(false);
+  const [instruction, setInstruction] = useState<string>("You are a helpful assistant.");
+  const [assistantResponse, setAssistantResponse] = useState<string>("");
+  const assistantResponseRef = useRef<string>("");
+  const openaiModel = "gpt-realtime-mini";
+
+  async function startRealtime() {
+    try {
+
+      const tokenRes = await fetch("/api/stt/elevenlabs-token");
+      const tokenJson = await tokenRes.json();
+      const token = tokenJson?.token;
+      if (!token) throw new Error("No scribe token");
+
+      const connection = Scribe.connect({
+        token,
+        modelId: "scribe_v2_realtime",
+        languageCode: "en",
+        commitStrategy: CommitStrategy.VAD,
+        vadSilenceThresholdSecs: 1.5,
+        vadThreshold: 0.4,
+        minSpeechDurationMs: 100,
+        minSilenceDurationMs: 100,
+        includeTimestamps: false,
+        microphone: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      connectionRef.current = connection;
+
+      connection.on(RealtimeEvents.SESSION_STARTED, () => {
+        setConnected(true);
+      });
+
+      connection.on(RealtimeEvents.PARTIAL_TRANSCRIPT, (data: any) => {
+        setPartialTranscript(data?.text ?? "");
+      });
+
+      connection.on(RealtimeEvents.COMMITTED_TRANSCRIPT, async (data: any) => {
+        const text = data?.text ?? "";
+        if (text) {
+          setTranscript(text ?? "");
+          setPartialTranscript("");
+          // append to transcript history window
+          setTranscriptHistory((h) => [...h, text]);
+          console.log("Committed transcript:", text);
+          if (text) await sendTextToOpenAI(text);
+        }
+      });
+
+      connection.on(RealtimeEvents.COMMITTED_TRANSCRIPT_WITH_TIMESTAMPS, (data: any) => {
+        setTranscript(data?.text ?? "");
+        setPartialTranscript("");
+        console.log("Timestamps:", data?.words ?? []);
+        // send committed transcript to OpenAI realtime
+
+      });
+
+      connection.on(RealtimeEvents.ERROR, (err: any) => {
+        console.error("Scribe error:", err);
+      });
+
+      connection.on(RealtimeEvents.OPEN, () => console.log("Connection opened"));
+      connection.on(RealtimeEvents.CLOSE, () => {
+        console.log("Connection closed");
+        setConnected(false);
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  function stopRealtime() {
+    try {
+      const conn = connectionRef.current;
+      if (conn && typeof conn.close === "function") conn.close();
+    } catch (e) {
+      console.error(e);
+    }
+
+    if (localStreamRef.current) {
+      for (const t of localStreamRef.current.getTracks()) t.stop();
+      localStreamRef.current = null;
+    }
+
+    connectionRef.current = null;
+    setConnected(false);
+    setTranscript("");
+    setPartialTranscript("");
+    try {
+      if (dcRef.current && typeof dcRef.current.close === "function") dcRef.current.close();
+    } catch (e) {
+      console.error("Failed to close data channel", e);
+    }
+    try {
+      if (pcRef.current && typeof pcRef.current.close === "function") pcRef.current.close();
+    } catch (e) {
+      console.error("Failed to close peer connection", e);
+    }
+    pcRef.current = null;
+    dcRef.current = null;
+    instructionSentRef.current = false;
+  }
+
+  async function ensureOpenAIConnection() {
+    if (dcRef.current) return dcRef.current;
+
+    // fetch ephemeral key from server
+    const res = await fetch("/api/ephemeral", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: openaiModel }),
+    });
+    console.log("/api/ephemeral status:", res.status);
+    const json = await res.json().catch((e) => {
+      console.error("Failed to parse /api/ephemeral response", e);
+      return null;
+    });
+    console.log("/api/ephemeral body:", json);
+    const token = json?.value || json?.value?.value || json?.value;
+    if (!token) throw new Error("Failed to obtain ephemeral OpenAI key");
+
+    try {
+      console.log("Ephemeral token obtained (prefix):", typeof token === "string" ? `${token.slice(0, 8)}...` : token);
+    } catch {}
+
+    // Create RTCPeerConnection for Realtime API (we're using the data channel).
+    // Add an audio transceiver so the SDP offer contains an audio media section
+    // (OpenAI /calls requires an audio m-section even if we're only sending text).
+    const pc = new RTCPeerConnection();
+    try {
+      pc.addTransceiver("audio", { direction: "recvonly" });
+      console.log("Added audio transceiver (recvonly) to include audio m-section in SDP");
+    } catch (e) {
+      console.warn("Failed to add audio transceiver", e);
+    }
+    pcRef.current = pc;
+
+    // Optional: add local microphone track if you wanted audio out/in — we skip it (text-only)
+
+    // Create data channel for events
+    const dc = pc.createDataChannel("oai-events");
+    dcRef.current = dc;
+    setAssistantResponse("");
+    assistantResponseRef.current = "";
+
+    dc.addEventListener("open", () => {
+      console.log("OpenAI data channel opened");
+    });
+
+    dc.addEventListener("message", (ev: any) => {
+      console.log("OpenAI DC raw message:", ev.data);
+      try {
+        const msg = JSON.parse(ev.data);
+        console.log("OpenAI DC parsed message type:", msg.type);
+        // handle response deltas
+        if (msg.type === "response.delta" || msg.type === "response.output_text.delta") {
+          const delta = msg.delta ?? msg.text ?? "";
+          appendAssistant(delta);
+        }
+        if (msg.type === "response.refusal.delta") {
+          appendAssistant("\n[refusal] ");
+        }
+        if (msg.type === "response.completed") {
+          console.log("OpenAI response completed", msg);
+          // clear assistant output after a short delay so the UI resets for next response
+          setTimeout(() => {
+            assistantResponseRef.current = "";
+            setAssistantResponse("");
+          }, 5000);
+        }
+
+        // handle conversation item events (added / done / delta)
+        if (msg.type && msg.type.startsWith("conversation.item") && msg.item) {
+          const role = msg.item.role;
+          if (role === "assistant") {
+            // extract text from item.content robustly
+            const parts: string[] = [];
+            try {
+              const content = msg.item.content;
+              if (Array.isArray(content)) {
+                for (const c of content) {
+                  if (!c) continue;
+                  const text = c.text ?? c.delta ?? c.content ?? c.value ?? "";
+                  if (typeof text === "string" && text.length > 0) parts.push(text);
+                }
+              } else if (typeof content === "string") {
+                parts.push(content);
+              }
+            } catch (e) {
+              console.warn("Failed to extract assistant text", e, msg.item);
+            }
+            const joined = parts.join("");
+            if (joined) appendAssistant(joined);
+          }
+        }
+
+        if (msg.type === "error") console.error("OpenAI realtime error", msg);
+      } catch (e) {
+        console.error("Error parsing OpenAI DC message", e, ev.data);
+      }
+    });
+
+    // Create offer and exchange SDP with OpenAI Realtime Calls endpoint
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    const callsUrl = "https://api.openai.com/v1/realtime/calls";
+    console.log("Posting offer.sdp to OpenAI Realtime Calls");
+    const sdpRes = await fetch(callsUrl, {
+      method: "POST",
+      body: offer.sdp,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/sdp",
+      },
+    });
+
+    if (!sdpRes.ok) {
+      const txt = await sdpRes.text().catch(() => "<no body>");
+      console.error("OpenAI realtime /calls error", sdpRes.status, txt);
+      throw new Error("OpenAI realtime /calls failed");
+    }
+
+    const answerSdp = await sdpRes.text();
+    console.log("Received SDP answer from OpenAI");
+    await pc.setRemoteDescription({ type: "answer", sdp: answerSdp } as any);
+
+    // When connection closes, clear refs
+    pc.addEventListener("iceconnectionstatechange", () => {
+      console.log("PC iceConnectionState", pc.iceConnectionState);
+      if (pc.iceConnectionState === "closed" || pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
+        pcRef.current = null;
+        dcRef.current = null;
+      }
+    });
+
+    // Wait for data channel to open before returning it
+    try {
+      await new Promise<void>((resolve, reject) => {
+        if (dc.readyState === "open") return resolve();
+        const onOpen = () => {
+          dc.removeEventListener("open", onOpen);
+          clearTimeout(timer);
+          resolve();
+        };
+        const onClose = () => {
+          dc.removeEventListener("open", onOpen);
+          clearTimeout(timer);
+          reject(new Error("Data channel closed before open"));
+        };
+        dc.addEventListener("open", onOpen);
+        dc.addEventListener("close", onClose);
+        const timer = setTimeout(() => {
+          dc.removeEventListener("open", onOpen);
+          dc.removeEventListener("close", onClose);
+          reject(new Error("Timeout waiting for data channel to open"));
+        }, 10000);
+      });
+      console.log("Data channel is open and ready");
+    } catch (err) {
+      console.error("Data channel failed to open:", err);
+      throw err;
+    }
+
+    return dc;
+  }
+
+  function appendAssistant(text: string) {
+    if (!text) return;
+    // avoid exact trailing duplicates
+    const cur = assistantResponseRef.current || "";
+    if (cur.endsWith(text)) return;
+    const next = cur + text;
+    assistantResponseRef.current = next;
+    setAssistantResponse(next);
+  }
+
+  async function sendTextToOpenAI(text: string) {
+    try {
+      const dc = await ensureOpenAIConnection();
+      // Clear previous assistant output before sending new user prompt
+      assistantResponseRef.current = "";
+      setAssistantResponse("");
+      // Send the system instruction once per session
+      if (!instructionSentRef.current && instruction && instruction.length > 0) {
+        const sysEvent = {
+          type: "conversation.item.create",
+          item: {
+            type: "message",
+            role: "system",
+            content: [
+              {
+                type: "input_text",
+                text: instruction,
+              },
+            ],
+          },
+        };
+        console.log("Sending system instruction to OpenAI data channel", sysEvent);
+        try {
+          dc.send(JSON.stringify(sysEvent));
+          instructionSentRef.current = true;
+        } catch (sendErr) {
+          console.error("Data channel send failed (system)", sendErr);
+        }
+      }
+
+      const event = {
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: text,
+            },
+          ],
+        },
+      };
+      console.log("Sending user event to OpenAI data channel", event);
+      try {
+        dc.send(JSON.stringify(event));
+      } catch (sendErr) {
+        console.error("Data channel send failed (user)", sendErr);
+      }
+      // After adding the user message, request a response from the model
+      const responseCreate = { type: "response.create" };
+      console.log("Sending response.create to OpenAI data channel", responseCreate);
+      try {
+        dc.send(JSON.stringify(responseCreate));
+      } catch (sendErr) {
+        console.error("Data channel send failed (response.create)", sendErr);
+      }
+    } catch (e) {
+      console.error("Failed to send to OpenAI realtime", e);
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      stopRealtime();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-6 p-8">
+      <h1 className="text-2xl font-bold">Audio Chat — Realtime Voice Agent</h1>
+      <div className="w-full max-w-xl bg-white p-4 rounded shadow">
+        <div className="flex gap-3">
+          <button onClick={startRealtime} disabled={connected} className="px-4 py-2 bg-green-600 text-white rounded">Start Session</button>
+          <button onClick={stopRealtime} disabled={!connected} className="px-4 py-2 bg-red-500 text-white rounded">Stop Session</button>
+        </div>
+        <div className="mt-2 text-sm">STT: ElevenLabs Scribe (realtime)</div>
+        <div className="mt-3">
+          <label className="block text-sm font-medium mb-1">Assistant Instructions</label>
+          <textarea
+            value={instruction}
+            onChange={(e) => setInstruction(e.target.value)}
+            rows={3}
+            className="w-full p-2 border rounded resize-none"
+            placeholder="Guidance for the assistant (system prompt)"
+          />
+        </div>
+      </div>
+      <div className="w-full max-w-xl bg-white p-4 rounded shadow mt-4">
+        <div><strong>Live Transcript</strong></div>
+        {partialTranscript && <div className="mt-2 text-sm text-gray-600">Partial: <em>{partialTranscript}</em></div>}
+        {transcript && <div className="mt-2 text-sm text-gray-600">Commited: <em>{transcript}</em></div>}
+      </div>
+
+      <div className="w-full max-w-xl bg-white p-4 rounded shadow mt-4">
+        <div><strong>Assistant Response</strong></div>
+        <div className="min-h-[48px] p-2 border rounded bg-gray-50 whitespace-pre-wrap">{assistantResponse || <span className="text-gray-400">(no response)</span>}</div>
+      </div>
+      <div className="w-full max-w-xl bg-white p-4 rounded shadow mt-4">
+        <div className="flex items-center justify-between">
+          <strong>Transcript History</strong>
+          <button onClick={() => setTranscriptHistory([])} className="text-sm text-red-600">Clear</button>
+        </div>
+        <div className="mt-2 max-h-48 overflow-auto p-2 border rounded bg-gray-50">
+          {transcriptHistory.length === 0 ? (
+            <div className="text-gray-400">(no transcripts yet)</div>
+          ) : (
+            transcriptHistory.map((t, i) => (
+              <div key={i} className="mb-2">
+                <div className="text-xs text-gray-500">{i + 1}</div>
+                <div className="text-sm">{t}</div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
