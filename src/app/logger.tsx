@@ -15,10 +15,10 @@ function shouldLog(level: LogLevel) {
 }
 
 export const logger = {
-  debug: (...args: any[]) => shouldLog('debug') && console.info('[DEBUG]', ...args),
-  info: (...args: any[]) => shouldLog('info') && console.info('[INFO]', ...args),
-  warn: (...args: any[]) => shouldLog('warn') && console.warn('[WARN]', ...args),
-  error: (...args: any[]) => shouldLog('error') && console.error('[ERROR]', ...args),
+  debug: (...args: unknown[]) => shouldLog('debug') && console.info('[DEBUG]', ...args),
+  info: (...args: unknown[]) => shouldLog('info') && console.info('[INFO]', ...args),
+  warn: (...args: unknown[]) => shouldLog('warn') && console.warn('[WARN]', ...args),
+  error: (...args: unknown[]) => shouldLog('error') && console.error('[ERROR]', ...args),
 };
 
 export default logger;

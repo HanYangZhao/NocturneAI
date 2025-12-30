@@ -41,8 +41,9 @@ export async function POST(req: NextRequest) {
     const data = JSON.parse(txt);
     // data.value contains ephemeral key starting with ek_
     return new Response(JSON.stringify({ value: data.value }), { headers: { "Content-Type": "application/json" } });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
     console.error("/api/ephemeral error:", err);
-    return new Response(JSON.stringify({ error: err?.message ?? String(err) }), { status: 500, headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: message }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
 }

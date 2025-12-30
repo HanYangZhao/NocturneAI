@@ -84,6 +84,8 @@ export interface MicrophoneOptions extends BaseOptions {
     noiseSuppression?: boolean;
     autoGainControl?: boolean;
     channelCount?: number;
+    /** Optional existing MediaStream to use instead of calling getUserMedia */
+    stream?: MediaStream;
   };
   audioFormat?: never;
   sampleRate?: never;
@@ -244,18 +246,20 @@ export class ScribeRealtime {
   ): Promise<void> {
     try {
       // Get microphone access
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId: options.microphone?.deviceId,
-          echoCancellation: options.microphone?.echoCancellation ?? true,
-          noiseSuppression: options.microphone?.noiseSuppression ?? true,
-          autoGainControl: options.microphone?.autoGainControl ?? true,
-          channelCount: options.microphone?.channelCount ?? 1,
-          sampleRate: { ideal: 16000 },
-        },
-      });
+      const stream: MediaStream =
+        options.microphone?.stream ??
+        (await navigator.mediaDevices.getUserMedia({
+          audio: {
+            deviceId: options.microphone?.deviceId,
+            echoCancellation: options.microphone?.echoCancellation ?? true,
+            noiseSuppression: options.microphone?.noiseSuppression ?? true,
+            autoGainControl: options.microphone?.autoGainControl ?? true,
+            channelCount: options.microphone?.channelCount ?? 1,
+            sampleRate: { ideal: 16000 },
+          },
+        }));
       // Expose the microphone stream for external mute/unmute
-      (connection as any)._microphoneStream = stream;
+      (connection as unknown as { _microphoneStream?: MediaStream })._microphoneStream = stream;
 
       // Create audio context at 16kHz (Scribe's default)
       const audioContext = new AudioContext({ sampleRate: 16000 });
@@ -301,7 +305,7 @@ export class ScribeRealtime {
         workletNode.disconnect();
         audioContext.close();
       };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Failed to start microphone streaming:", error);
       throw error;
     }

@@ -6,6 +6,7 @@
   import logger from "./logger";
   import { RealtimeEvents, CommitStrategy } from "@elevenlabs/client";
   import { ScribeRealtime as Scribe } from "./scribe/scribe";
+  import type { RealtimeConnection } from "./scribe/connection";
 
 export default function AudioChatClean() {
       // Stop TTS audio playback
@@ -24,7 +25,9 @@ export default function AudioChatClean() {
   function muteMic() {
     const micStream = connectionRef.current?._microphoneStream;
     if (micStream && micStream.getAudioTracks().length > 0) {
-      micStream.getAudioTracks().forEach((track) => (track.enabled = false));
+      micStream.getAudioTracks().forEach((track: MediaStreamTrack) => {
+        track.enabled = false;
+      });
       setMicMuted(true);
     } else {
       logger.warn('No Scribe microphone stream to mute.');
@@ -34,7 +37,9 @@ export default function AudioChatClean() {
   function unmuteMic() {
     const micStream = connectionRef.current?._microphoneStream;
     if (micStream && micStream.getAudioTracks().length > 0) {
-      micStream.getAudioTracks().forEach((track) => (track.enabled = true));
+      micStream.getAudioTracks().forEach((track: MediaStreamTrack) => {
+        track.enabled = true;
+      });
       setMicMuted(false);
     } else {
       logger.warn('No Scribe microphone stream to unmute.');
@@ -108,9 +113,10 @@ export default function AudioChatClean() {
   // Store transcript history as array of { role, text }
   const [transcriptHistory, setTranscriptHistory] = useState<{ role: "user" | "assistant"; text: string }[]>([]);
   const localStreamRef = useRef<MediaStream | null>(null);
-  const connectionRef = useRef<any | null>(null);
+  type RealtimeWithOptionalStream = RealtimeConnection & { _microphoneStream?: MediaStream };
+  const connectionRef = useRef<RealtimeWithOptionalStream | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
-  const dcRef = useRef<any | null>(null);
+  const dcRef = useRef<RTCDataChannel | null>(null);
   const instructionSentRef = useRef<boolean>(false);
   const [instruction, setInstruction] = useState<string>("You are a helpful assistant.");
   const [assistantResponse, setAssistantResponse] = useState<string>("");
@@ -150,7 +156,7 @@ export default function AudioChatClean() {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-          stream: localStreamRef.current,
+          stream: localStreamRef.current ?? undefined,
         },
       });
       connectionRef.current = connection;
@@ -159,15 +165,22 @@ export default function AudioChatClean() {
         setConnected(true);
         setElStatus('connected');
       });
-      connection.on(RealtimeEvents.ERROR, (err: any) => {
+      connection.on(RealtimeEvents.ERROR, (err: unknown) => {
         setElStatus('error');
         logger.error("Scribe error:", err);
       });
-      connection.on(RealtimeEvents.PARTIAL_TRANSCRIPT, (data: any) => {
-        setPartialTranscript(data?.text ?? "");
+      connection.on(RealtimeEvents.PARTIAL_TRANSCRIPT, (data: unknown) => {
+        if (typeof data === 'object' && data !== null && 'text' in data) {
+          const d = data as { text?: unknown };
+          if (typeof d.text === 'string') setPartialTranscript(d.text);
+        }
       });
-      connection.on(RealtimeEvents.COMMITTED_TRANSCRIPT, async (data: any) => {
-        const text = data?.text ?? "";
+      connection.on(RealtimeEvents.COMMITTED_TRANSCRIPT, async (data: unknown) => {
+        let text = "";
+        if (typeof data === 'object' && data !== null && 'text' in data) {
+          const d = data as { text?: unknown };
+          if (typeof d.text === 'string') text = d.text;
+        }
         if (text) {
           setTranscript(text ?? "");
           setPartialTranscript("");
@@ -176,10 +189,13 @@ export default function AudioChatClean() {
           if (text) await sendTextToOpenAI(text);
         }
       });
-      connection.on(RealtimeEvents.COMMITTED_TRANSCRIPT_WITH_TIMESTAMPS, (data: any) => {
-        setTranscript(data?.text ?? "");
-        setPartialTranscript("");
-        logger.debug("Timestamps:", data?.words ?? []);
+      connection.on(RealtimeEvents.COMMITTED_TRANSCRIPT_WITH_TIMESTAMPS, (data: unknown) => {
+        if (typeof data === 'object' && data !== null && 'text' in data) {
+          const d = data as { text?: unknown; words?: unknown };
+          if (typeof d.text === 'string') setTranscript(d.text);
+          setPartialTranscript("");
+          logger.debug("Timestamps:", Array.isArray(d.words) ? d.words : []);
+        }
       });
       connection.on(RealtimeEvents.OPEN, () => logger.info("Connection opened"));
       connection.on(RealtimeEvents.CLOSE, () => {
@@ -280,10 +296,11 @@ export default function AudioChatClean() {
       logger.info("OpenAI data channel opened");
     });
 
-    dc.addEventListener("message", (ev: any) => {
-      logger.debug("OpenAI DC raw message:", ev.data);
+    dc.addEventListener("message", (ev: MessageEvent) => {
+      const raw = ev.data;
+      logger.debug("OpenAI DC raw message:", raw);
       try {
-        const msg = JSON.parse(ev.data);
+        const msg = JSON.parse(String(raw));
         logger.debug("OpenAI DC parsed message type:", msg.type);
         // handle response deltas
         if (msg.type === "response.delta" || msg.type === "response.output_text.delta") {
@@ -332,8 +349,8 @@ export default function AudioChatClean() {
         }
 
         if (msg.type === "error") logger.error("OpenAI realtime error", msg);
-      } catch (e) {
-        logger.error("Error parsing OpenAI DC message", e, ev.data);
+      } catch (e: unknown) {
+        logger.error("Error parsing OpenAI DC message", e, raw);
       }
     });
 
@@ -360,7 +377,7 @@ export default function AudioChatClean() {
 
     const answerSdp = await sdpRes.text();
     logger.info("Received SDP answer from OpenAI");
-    await pc.setRemoteDescription({ type: "answer", sdp: answerSdp } as any);
+    await pc.setRemoteDescription({ type: "answer", sdp: answerSdp } as RTCSessionDescriptionInit);
 
     // When connection closes, clear refs
     pc.addEventListener("iceconnectionstatechange", () => {

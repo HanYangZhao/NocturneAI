@@ -21,7 +21,8 @@ export async function GET(req: NextRequest) {
       return new Response(JSON.stringify({ error: body }), { status: resp.status, headers: { "Content-Type": "application/json" } });
     }
     return new Response(JSON.stringify({ token: body.token }), { headers: { "Content-Type": "application/json" } });
-  } catch (e: any) {
-    return new Response(JSON.stringify({ error: String(e) }), { status: 500, headers: { "Content-Type": "application/json" } });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    return new Response(JSON.stringify({ error: message }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
 }

@@ -29,28 +29,45 @@ export async function POST(req: NextRequest) {
     const chunks: Uint8Array[] = [];
 
     // Support both async-iterable node streams and web ReadableStream
-    if (typeof (audioStream as any)[Symbol.asyncIterator] === "function") {
-      for await (const chunk of audioStream as any) {
-        if (chunk instanceof Uint8Array) chunks.push(chunk);
-        else if (typeof Buffer !== "undefined" && Buffer.isBuffer(chunk)) chunks.push(new Uint8Array(chunk));
-        else chunks.push(new Uint8Array(chunk as any));
+    const candidate: unknown = audioStream;
+
+    function isAsyncIterable(o: unknown): o is AsyncIterable<unknown> {
+      return typeof o === 'object' && o !== null && Symbol.asyncIterator in Object(o);
+    }
+
+    function hasGetReader(o: unknown): o is ReadableStream {
+      return typeof o === 'object' && o !== null && typeof (o as { getReader?: unknown }).getReader === 'function';
+    }
+
+    async function pushChunk(val: unknown) {
+      if (val instanceof Uint8Array) chunks.push(val);
+      else if (val instanceof ArrayBuffer) chunks.push(new Uint8Array(val));
+      else if (typeof Buffer !== 'undefined' && Buffer.isBuffer(val as unknown as Buffer)) chunks.push(new Uint8Array(val as unknown as Buffer));
+      else if (ArrayBuffer.isView(val as ArrayBuffer)) chunks.push(new Uint8Array((val as ArrayBuffer).slice(0)));
+      else {
+        // unknown chunk type — skip
       }
-    } else if (typeof (audioStream as any).getReader === "function") {
-      const reader = (audioStream as any).getReader();
+    }
+
+    if (isAsyncIterable(candidate)) {
+      for await (const chunk of candidate) {
+        await pushChunk(chunk);
+      }
+    } else if (hasGetReader(candidate)) {
+      const reader = (candidate as ReadableStream).getReader();
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = value as Uint8Array | ArrayBuffer;
-        if (chunk instanceof Uint8Array) chunks.push(chunk);
-        else if (chunk instanceof ArrayBuffer) chunks.push(new Uint8Array(chunk));
-        else chunks.push(new Uint8Array(chunk as any));
+        await pushChunk(value);
       }
     } else {
       // Fallback: try to treat as async iterable anyway
-      for await (const chunk of audioStream as any) {
-        if (chunk instanceof Uint8Array) chunks.push(chunk);
-        else if (typeof Buffer !== "undefined" && Buffer.isBuffer(chunk)) chunks.push(new Uint8Array(chunk));
-        else chunks.push(new Uint8Array(chunk as any));
+      try {
+        for await (const chunk of candidate as AsyncIterable<unknown>) {
+          await pushChunk(chunk);
+        }
+      } catch {
+        // give up
       }
     }
 
@@ -63,8 +80,8 @@ export async function POST(req: NextRequest) {
     }
 
     return new Response(out, { headers: { "Content-Type": "audio/mpeg", "Content-Length": String(out.length) } });
-  } catch (err: any) {
-    const message = err?.message ?? String(err);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
     return new Response(JSON.stringify({ error: message }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
 }
