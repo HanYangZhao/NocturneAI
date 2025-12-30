@@ -559,7 +559,6 @@ export default function AudioChatClean() {
             }>OpenAI: {oaiStatus.charAt(0).toUpperCase() + oaiStatus.slice(1)}</span>
           </span>
         </div>
-        <div className="mt-2 text-sm">STT: ElevenLabs Scribe (realtime)</div>
         <div className="mt-3">
           <label className="block text-sm font-medium mb-1">API Password</label>
           <input
