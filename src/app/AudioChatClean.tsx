@@ -22,6 +22,13 @@ export default function AudioChatClean() {
     const [micMuted, setMicMuted] = useState(false);
   // --- TTS and mic helpers (must be inside component for refs) ---
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Additional audio routing refs / state
+  const graphAudioRef = useRef<HTMLAudioElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const outDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const [audioOutputs, setAudioOutputs] = useState<{ deviceId: string; label: string }[]>([]);
+  const [selectedOutputId, setSelectedOutputId] = useState<string>("default");
+  const [supportsSetSinkId, setSupportsSetSinkId] = useState<boolean>(false);
   function muteMic() {
     const micStream = connectionRef.current?._microphoneStream;
     if (micStream && micStream.getAudioTracks().length > 0) {
@@ -66,38 +73,52 @@ export default function AudioChatClean() {
       if (!res.ok) throw new Error('TTS request failed');
       const audioData = await res.arrayBuffer();
       logger.debug('[TTS] Received audio data, byteLength:', audioData.byteLength);
-      const blob = new Blob([audioData], { type: 'audio/mpeg' });
-      const url = URL.createObjectURL(blob);
-      logger.debug('[TTS] Created audio blob and object URL:', url);
-      if (audioRef.current) {
-        logger.debug('[TTS] Using <audio> element for playback');
-        audioRef.current.src = url;
-        audioRef.current.onended = () => {
-          logger.debug('[TTS] <audio> playback ended, revoking URL and unmuting mic');
-          URL.revokeObjectURL(url);
+      // Route TTS through AudioContext -> MediaStreamDestination so it uses the selected output
+      try {
+        const ac = audioContextRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
+        audioContextRef.current = ac;
+        const decoded = await ac.decodeAudioData(audioData.slice(0));
+        const src = ac.createBufferSource();
+        src.buffer = decoded;
+        // ensure destination exists
+        const dest = outDestinationRef.current || ac.createMediaStreamDestination();
+        outDestinationRef.current = dest;
+        src.connect(dest);
+        // also connect to destination to keep audio playing through context's destination (optional)
+        try { src.connect(ac.destination); } catch (e) {}
+        src.start();
+        logger.debug('[TTS] Playing decoded buffer via AudioContext');
+        // When finished, unmute mic
+        src.onended = () => {
+          logger.debug('[TTS] AudioContext buffer ended, unmuting mic');
           unmuteMic();
         };
-        try {
-          await audioRef.current.play();
-          logger.debug('[TTS] <audio> playback started');
-        } catch (err) {
-          logger.error('[TTS] <audio> playback error', err);
-          unmuteMic();
+        // Ensure graphAudioRef is attached and sink applied
+        ensureGraphRouting();
+        if (supportsSetSinkId && graphAudioRef.current && (graphAudioRef.current as any).setSinkId) {
+          try {
+            // @ts-ignore
+            await (graphAudioRef.current as any).setSinkId(selectedOutputId);
+            logger.debug('[TTS] setSinkId applied to graph audio element', selectedOutputId);
+          } catch (err) {
+            logger.warn('[TTS] graph setSinkId failed', err);
+          }
         }
-      } else {
-        logger.debug('[TTS] <audio> ref missing, using fallback Audio()');
-        const audio = new Audio(url);
-        audio.onended = () => {
-          logger.debug('[TTS] fallback Audio() playback ended, revoking URL and unmuting mic');
-          URL.revokeObjectURL(url);
-          unmuteMic();
-        };
-        try {
-          await audio.play();
-          logger.debug('[TTS] fallback Audio() playback started');
-        } catch (err) {
-          logger.error('[TTS] fallback Audio() playback error', err);
-          unmuteMic();
+      } catch (e) {
+        logger.warn('[TTS] AudioContext decode/play failed, falling back to element playback', e);
+        const blob = new Blob([audioData], { type: 'audio/mpeg' });
+        const url = URL.createObjectURL(blob);
+        if (audioRef.current) {
+          audioRef.current.src = url;
+          audioRef.current.onended = () => {
+            URL.revokeObjectURL(url);
+            unmuteMic();
+          };
+          try { await audioRef.current.play(); } catch (err) { logger.warn('Fallback element play failed', err); unmuteMic(); }
+        } else {
+          const audio = new Audio(url);
+          audio.onended = () => { URL.revokeObjectURL(url); unmuteMic(); };
+          try { await audio.play(); } catch (err) { logger.warn('Fallback Audio() play failed', err); unmuteMic(); }
         }
       }
     } catch (err) {
@@ -105,6 +126,31 @@ export default function AudioChatClean() {
       unmuteMic();
     }
   }
+
+  // Setup graph routing element and audio context on mount
+  useEffect(() => {
+    (async () => {
+      await refreshAudioOutputs();
+      ensureGraphRouting();
+    })();
+
+    return () => {
+      try {
+        if (graphAudioRef.current) {
+          // remove injected audio element
+          try { document.body.removeChild(graphAudioRef.current); } catch (e) {}
+          graphAudioRef.current = null;
+        }
+        if (audioContextRef.current) {
+          try { audioContextRef.current.close(); } catch (e) {}
+          audioContextRef.current = null;
+        }
+      } catch (e) {
+        logger.warn('Cleanup error', e);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function hashPassword(pw: string) {
     try {
@@ -174,6 +220,13 @@ export default function AudioChatClean() {
         },
       });
       connectionRef.current = connection;
+
+      // refresh available audio outputs when session starts
+      try {
+        await refreshAudioOutputs();
+      } catch (e) {
+        logger.warn('Failed to refresh audio outputs', e);
+      }
 
       connection.on(RealtimeEvents.SESSION_STARTED, () => {
         setConnected(true);
@@ -434,6 +487,86 @@ export default function AudioChatClean() {
     return dc;
   }
 
+  // Enumerate audio output devices and detect setSinkId support
+  async function refreshAudioOutputs() {
+    try {
+      // Ensure permissions so labels are available
+      try {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (e) {
+        logger.debug('No mic permission when enumerating outputs — labels may be blank');
+      }
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const outputs = devices.filter((d) => d.kind === 'audiooutput').map((d) => ({ deviceId: d.deviceId, label: d.label || 'Unknown output' }));
+      setAudioOutputs(outputs);
+      setSupportsSetSinkId(typeof (HTMLAudioElement.prototype as any).setSinkId === 'function');
+      if (outputs.length > 0 && selectedOutputId === 'default') {
+        setSelectedOutputId(outputs[0].deviceId);
+      }
+    } catch (e) {
+      logger.error('Failed to enumerate devices', e);
+    }
+  }
+
+  // Create/ensure an audio context and a destination that we can route to an <audio> element
+  function ensureGraphRouting() {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    const ac = audioContextRef.current!;
+    if (!outDestinationRef.current) {
+      outDestinationRef.current = ac.createMediaStreamDestination();
+    }
+    // Attach destination stream to hidden audio element for sink switching
+    if (!graphAudioRef.current) {
+      const a = document.createElement('audio');
+      a.autoplay = true;
+      a.muted = false;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      graphAudioRef.current = a;
+    }
+    if (graphAudioRef.current && outDestinationRef.current) {
+      try {
+        graphAudioRef.current.srcObject = outDestinationRef.current.stream;
+      } catch (e) {
+        logger.warn('Failed to set srcObject on graph audio element', e);
+      }
+      // apply sink if supported
+      if (supportsSetSinkId && selectedOutputId && (graphAudioRef.current as any).setSinkId) {
+        try {
+          // @ts-ignore
+          (graphAudioRef.current as any).setSinkId(selectedOutputId);
+          logger.debug('Applied setSinkId to graph audio element', selectedOutputId);
+        } catch (err) {
+          logger.warn('setSinkId failed on graph audio element', err);
+        }
+      }
+    }
+    return outDestinationRef.current;
+  }
+
+  // Call this when user changes selected output
+  async function applySelectedOutput(deviceId: string) {
+    setSelectedOutputId(deviceId);
+    // set sink for TTS audioRef and for graph audio element
+    const sinkTargets = [audioRef.current, graphAudioRef.current];
+    for (const el of sinkTargets) {
+      if (!el) continue;
+      // @ts-ignore
+      if (typeof el.setSinkId === 'function') {
+        try {
+          // @ts-ignore
+          await el.setSinkId(deviceId);
+          logger.info('setSinkId applied to element', deviceId);
+        } catch (e) {
+          logger.warn('setSinkId failed on element', e);
+        }
+      }
+    }
+  }
+
   // Helper to append assistant response to UI and (optionally) transcript history
   function appendAssistant(text: string, done: boolean = false) {
     if (!text) return;
@@ -579,7 +712,9 @@ export default function AudioChatClean() {
         </div>
       </div>
       <div className="w-full max-w-xl bg-white p-4 rounded shadow mt-4">
-        <div><strong>Live Transcript</strong></div>
+        <div className="flex items-center justify-between">
+          <strong>Live Transcript</strong>
+        </div>
         <div className="mt-2 max-h-40 overflow-auto p-2 border rounded bg-gray-50 text-sm whitespace-pre-wrap">
           {partialTranscript ? (
             <div className="mb-2"><strong>Partial:</strong> <em>{partialTranscript}</em></div>
@@ -593,8 +728,33 @@ export default function AudioChatClean() {
       </div>
 
       <div className="w-full max-w-xl bg-white p-4 rounded shadow mt-4">
-        <div><strong>Assistant Response</strong></div>
-        <div className="min-h-[48px] p-2 border rounded bg-gray-50 whitespace-pre-wrap">{assistantResponse || <span className="text-gray-400">(no response)</span>}</div>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <strong>Assistant Response</strong>
+            <div className="min-h-[48px] mt-2 p-2 border rounded bg-gray-50 whitespace-pre-wrap">{assistantResponse || <span className="text-gray-400">(no response)</span>}</div>
+          </div>
+          <div className="flex flex-col items-end gap-2">
+            <label className="text-sm">Output device</label>
+            <select
+              value={selectedOutputId}
+              onChange={async (e) => {
+                const id = e.target.value;
+                await applySelectedOutput(id);
+              }}
+              onClick={() => refreshAudioOutputs()}
+              className="p-1 border rounded text-sm"
+            >
+              {audioOutputs.length === 0 ? <option value="default">default</option> : null}
+              {audioOutputs.map((o) => (
+                <option key={o.deviceId} value={o.deviceId}>{o.label || o.deviceId}</option>
+              ))}
+            </select>
+            <button onClick={() => refreshAudioOutputs()} className="text-xs text-blue-600">Refresh</button>
+            {!supportsSetSinkId ? (
+              <div className="text-xs text-gray-500 mt-1">Note: Browser may not support per-tab output. Use system output or Chromium.</div>
+            ) : null}
+          </div>
+        </div>
       </div>
       <div className="w-full max-w-xl bg-white p-4 rounded shadow mt-4">
         <div className="flex items-center justify-between">
