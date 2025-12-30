@@ -56,9 +56,10 @@ export default function AudioChatClean() {
     try {
       muteMic();
       logger.debug('[TTS] Mic muted, sending request to /api/tts');
+      const pwHash = await hashPassword(apiPassword || "");
       const res = await fetch('/api/tts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-api-password': pwHash },
         body: JSON.stringify({ text }),
       });
       logger.debug('[TTS] /api/tts response status:', res.status);
@@ -105,7 +106,19 @@ export default function AudioChatClean() {
     }
   }
 
+  async function hashPassword(pw: string) {
+    try {
+      const enc = new TextEncoder().encode(pw);
+      const buf = await crypto.subtle.digest('SHA-256', enc);
+      return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+    } catch (e) {
+      logger.warn('hashPassword failed', e);
+      return '';
+    }
+  }
+
   const [connected, setConnected] = useState(false);
+  const [apiPassword, setApiPassword] = useState<string>("");
   const [elStatus, setElStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [oaiStatus, setOaiStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [transcript, setTranscript] = useState("");
@@ -137,7 +150,8 @@ export default function AudioChatClean() {
         }
       }
       // Start ElevenLabs connection
-      const tokenRes = await fetch("/api/stt/elevenlabs-token");
+      const pwHash = await hashPassword(apiPassword || "");
+      const tokenRes = await fetch("/api/stt/elevenlabs-token", { headers: { 'x-api-password': pwHash } });
       const tokenJson = await tokenRes.json();
       const token = tokenJson?.token;
       if (!token) throw new Error("No scribe token");
@@ -254,9 +268,10 @@ export default function AudioChatClean() {
     if (dcRef.current) return dcRef.current;
 
     // fetch ephemeral key from server
+    const pwHash = await hashPassword(apiPassword || "");
     const res = await fetch("/api/ephemeral", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", 'x-api-password': pwHash },
       body: JSON.stringify({ model: openaiModel }),
     });
     logger.debug("/api/ephemeral status:", res.status);
@@ -546,6 +561,14 @@ export default function AudioChatClean() {
         </div>
         <div className="mt-2 text-sm">STT: ElevenLabs Scribe (realtime)</div>
         <div className="mt-3">
+          <label className="block text-sm font-medium mb-1">API Password</label>
+          <input
+            type="password"
+            value={apiPassword}
+            onChange={(e) => setApiPassword(e.target.value)}
+            className="w-full p-2 border rounded mb-2"
+            placeholder="Enter API password"
+          />
           <label className="block text-sm font-medium mb-1">Assistant Instructions</label>
           <textarea
             value={instruction}

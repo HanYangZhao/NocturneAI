@@ -4,6 +4,14 @@ import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
+  const provided = req.headers.get('x-api-password') || '';
+  const expected = process.env.API_PASSWORD_HASH;
+  if (!expected) {
+    return new Response(JSON.stringify({ error: 'Missing API_PASSWORD_HASH on server' }), { status: 500, headers: { "Content-Type": "application/json" } });
+  }
+  if (provided !== expected) {
+    return new Response(JSON.stringify({ error: 'Invalid API password' }), { status: 401, headers: { "Content-Type": "application/json" } });
+  }
   const body = await req.json();
   const text = body.text as string | undefined;
   if (!text) {
