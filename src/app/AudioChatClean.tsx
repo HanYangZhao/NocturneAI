@@ -581,8 +581,16 @@ export default function AudioChatClean() {
       </div>
       <div className="w-full max-w-xl bg-white p-4 rounded shadow mt-4">
         <div><strong>Live Transcript</strong></div>
-        {partialTranscript && <div className="mt-2 text-sm text-gray-600">Partial: <em>{partialTranscript}</em></div>}
-        {transcript && <div className="mt-2 text-sm text-gray-600">Commited: <em>{transcript}</em></div>}
+        <div className="mt-2 max-h-40 overflow-auto p-2 border rounded bg-gray-50 text-sm whitespace-pre-wrap">
+          {partialTranscript ? (
+            <div className="mb-2"><strong>Partial:</strong> <em>{partialTranscript}</em></div>
+          ) : null}
+          {transcript ? (
+            <div><strong>Committed:</strong> <em>{transcript}</em></div>
+          ) : (
+            <div className="text-gray-400">(no transcript)</div>
+          )}
+        </div>
       </div>
 
       <div className="w-full max-w-xl bg-white p-4 rounded shadow mt-4">
@@ -594,7 +602,12 @@ export default function AudioChatClean() {
           <strong>Transcript History</strong>
           <button onClick={() => setTranscriptHistory([])} className="text-sm text-red-600">Clear</button>
         </div>
-        <div className="mt-2 max-h-48 overflow-auto p-2 border rounded bg-gray-50">
+        <div
+          className="mt-2 max-h-48 overflow-y-auto overflow-x-hidden p-2 border rounded bg-gray-50"
+          role="region"
+          aria-label="Transcript history"
+          tabIndex={0}
+        >
           {transcriptHistory.length === 0 ? (
             <div className="text-gray-400">(no transcripts yet)</div>
           ) : (
