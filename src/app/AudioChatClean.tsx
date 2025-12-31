@@ -91,13 +91,12 @@ export default function AudioChatClean() {
 
   const paramRanges: Record<string, { min: number; max: number; step?: number }> = {
     feedback: { min: 0, max: 1, step: 0.01 },
-    delayTime: { min: 1, max: 10000, step: 1 },
+    delayTime: { min: 1, max: 3000, step: 1 },
     wetLevel: { min: 0, max: 2, step: 0.01 },
     dryLevel: { min: 0, max: 2, step: 0.01 },
-    cutoff: { min: 20, max: 22050, step: 1 },
+    cutoff: { min: 20, max: 10000, step: 1 },
     rate: { min: 0.01, max: 8, step: 0.01 },
     depth: { min: 0, max: 1, step: 0.01 },
-    feedback: { min: 0, max: 1, step: 0.01 },
     delay: { min: 0, max: 1, step: 0.0001 },
     outputGain: { min: -42, max: 0, step: 0.1 },
     drive: { min: 0, max: 1, step: 0.01 },
@@ -113,10 +112,15 @@ export default function AudioChatClean() {
     intensity: { min: 0, max: 1, step: 0.01 },
     bits: { min: 1, max: 16, step: 1 },
     normfreq: { min: 0, max: 1, step: 0.01 },
-    cutoff: { min: 0, max: 1, step: 0.001 },
     bufferSize: { min: 256, max: 16384, step: 256 },
     resonance: { min: 0, max: 4, step: 0.01 },
   };
+
+  function formatNumericValue(n: unknown) {
+    if (typeof n !== 'number' || Number.isNaN(n)) return String(n);
+    if (Number.isInteger(n)) return String(n);
+    return parseFloat(n.toFixed(4)).toString();
+  }
   function muteMic() {
     // mute both the local stream obtained via getUserMedia and any stream
     // attached inside the Scribe connection (connectionRef.current._microphoneStream)
@@ -309,6 +313,21 @@ export default function AudioChatClean() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Refresh effectsList when external updates occur (e.g., MIDI mapped CCs)
+  useEffect(() => {
+    function handler(ev: any) {
+      try {
+        const ef = AudioFX.getEffects() || [];
+        const next = ef.map((e: any) => ({ id: e.id, type: e.type, params: e.params || {}, bypass: !!(e.params && e.params.bypass) }));
+        setEffectsList(next);
+      } catch (e) {
+        // ignore
+      }
+    }
+    window.addEventListener('audiofx:paramsUpdated', handler as EventListener);
+    return () => { window.removeEventListener('audiofx:paramsUpdated', handler as EventListener); };
   }, []);
 
   async function hashPassword(pw: string) {
@@ -987,15 +1006,41 @@ export default function AudioChatClean() {
                     </div>
                   </div>
                   <div className="mt-2 grid grid-cols-2 gap-2">
-                    {Object.keys(fx.params || {}).filter(k=> typeof (fx.params||{})[k] === 'number').slice(0,4).map((k) => {
-                      const v = (fx.params || {})[k] as number;
-                      const range = paramRanges[k] || { min: 0, max: 1, step: 0.01 };
+                    {Object.keys(fx.params || {}).slice(0,6).map((k) => {
+                      // Hide internal/bypass param since we expose a dedicated checkbox
+                      if (k === 'bypass') return null;
+                      const val = (fx.params || {})[k];
+                      // numeric params -> slider
+                      if (typeof val === 'number') {
+                        const v = val as number;
+                        const range = paramRanges[k] || { min: 0, max: 1, step: 0.01 };
+                        return (
+                          <div key={k} className="flex flex-col text-xs">
+                            <label className="mb-1">{k}</label>
+                            <input type="range" min={range.min} max={range.max} step={range.step || 0.01} value={v}
+                              onChange={(e)=>{ const nv = Number(e.target.value); const nextEffects = effectsList.map(x=> x.id===fx.id?{...x, params: {...x.params, [k]: nv}}:x); setEffectsList(nextEffects); AudioFX.updateEffectParams(fx.id, { [k]: nv }); }} />
+                            <div className="text-right text-[11px] text-gray-600">{formatNumericValue(v)}</div>
+                          </div>
+                        );
+                      }
+                      // filterType select for Filter effect
+                      if (fx.type === 'Filter' && k === 'filterType') {
+                        const options = ['lowpass','highpass','bandpass','lowshelf','highshelf','peaking','notch','allpass'];
+                        const v = String(val || '');
+                        return (
+                          <div key={k} className="flex flex-col text-xs">
+                            <label className="mb-1">{k}</label>
+                            <select className="p-1 text-xs border" value={v} onChange={(e) => { const nv = e.target.value; const nextEffects = effectsList.map(x=> x.id===fx.id?{...x, params: {...x.params, [k]: nv}}:x); setEffectsList(nextEffects); AudioFX.updateEffectParams(fx.id, { [k]: nv }); }}>
+                              {options.map(o => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                          </div>
+                        );
+                      }
+                      // fallback: show value as text (read-only)
                       return (
                         <div key={k} className="flex flex-col text-xs">
                           <label className="mb-1">{k}</label>
-                          <input type="range" min={range.min} max={range.max} step={range.step || 0.01} value={v}
-                            onChange={(e)=>{ const nv = Number(e.target.value); const nextEffects = effectsList.map(x=> x.id===fx.id?{...x, params: {...x.params, [k]: nv}}:x); setEffectsList(nextEffects); AudioFX.updateEffectParams(fx.id, { [k]: nv }); }} />
-                          <div className="text-right text-[11px] text-gray-600">{String(v)}</div>
+                          <div className="p-1 text-xs text-gray-700 border">{String(val)}</div>
                         </div>
                       );
                     })}
