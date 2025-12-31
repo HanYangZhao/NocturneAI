@@ -4,6 +4,7 @@
 
   import React, { useEffect, useRef, useState } from "react";
   import logger from "./logger";
+  import * as AudioFX from "./audiofx";
   import { RealtimeEvents, CommitStrategy } from "@elevenlabs/client";
   import { ScribeRealtime as Scribe } from "./scribe/scribe";
   import type { RealtimeConnection } from "./scribe/connection";
@@ -11,17 +12,38 @@
 export default function AudioChatClean() {
       // Stop TTS audio playback
       function stopTTSPlayback() {
+        // Stop element-based playback
         if (audioRef.current) {
-          audioRef.current.pause();
-          audioRef.current.currentTime = 0;
-          audioRef.current.src = "";
-          logger.info('[TTS] Audio playback stopped by user');
-          unmuteMic();
+          try { audioRef.current.pause(); } catch (e) {}
+          try { audioRef.current.currentTime = 0; } catch (e) {}
+          try { audioRef.current.src = ""; } catch (e) {}
         }
+        // Stop any active AudioBufferSourceNode (AudioContext playback)
+        try {
+            // disconnect audiofx chain first to ensure effect nodes stop producing audio
+            try { AudioFX.disconnectActiveChain(); } catch (e) {}
+            if (activeBufferSrcRef.current) {
+            try {
+              activeBufferSrcRef.current.onended = null;
+            } catch (e) {}
+            try { activeBufferSrcRef.current.stop(); } catch (e) {}
+            try { activeBufferSrcRef.current.disconnect(); } catch (e) {}
+            activeBufferSrcRef.current = null;
+          }
+        } catch (e) {
+          // ignore
+        }
+          try { isPlayingTTSRef.current = false; } catch (e) {}
+        logger.info('[TTS] Audio playback stopped by user');
+        unmuteMic();
       }
     const [micMuted, setMicMuted] = useState(false);
   // --- TTS and mic helpers (must be inside component for refs) ---
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Active AudioBufferSourceNode when using AudioContext playback
+  const activeBufferSrcRef = useRef<AudioBufferSourceNode | null>(null);
+  // Track when we're playing assistant TTS so we can ignore mic transcripts
+  const isPlayingTTSRef = useRef<boolean>(false);
   // Additional audio routing refs / state
   const graphAudioRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -29,29 +51,121 @@ export default function AudioChatClean() {
   const [audioOutputs, setAudioOutputs] = useState<{ deviceId: string; label: string }[]>([]);
   const [selectedOutputId, setSelectedOutputId] = useState<string>("default");
   const [supportsSetSinkId, setSupportsSetSinkId] = useState<boolean>(false);
-  function muteMic() {
-    const micStream = connectionRef.current?._microphoneStream;
-    if (micStream && micStream.getAudioTracks().length > 0) {
-      micStream.getAudioTracks().forEach((track: MediaStreamTrack) => {
-        track.enabled = false;
-      });
-      setMicMuted(true);
-    } else {
-      logger.warn('No Scribe microphone stream to mute.');
-      setMicMuted(true); // UI feedback only
+  
+  // Effects manager (UI state mirrored to audiofx)
+  const [effectsList, setEffectsList] = useState<Array<{ id: string; type: string; params: any; bypass?: boolean }>>([]);
+  const [chainList, setChainList] = useState<string[]>([]);
+  const defaultChainRef = useRef<string[] | null>(null);
+
+  function computeChainFromConnections(conns: Array<{ from: string; to: string }>) {
+    // build successor map (keep first successor if multiple)
+    const succ: Record<string,string> = {};
+    const indegree: Record<string, number> = {};
+    for (const e of effectsList) indegree[e.id]=0;
+    for (const c of conns) {
+      if (!succ[c.from]) succ[c.from]=c.to;
+      indegree[c.to] = (indegree[c.to]||0)+1;
     }
+    // find start nodes (indegree 0)
+    const starts = Object.keys(indegree).filter(k=>indegree[k]===0);
+    const order: string[] = [];
+    if (starts.length>0) {
+      let cur = starts[0];
+      const visited = new Set<string>();
+      while (cur && !visited.has(cur)) {
+        visited.add(cur);
+        order.push(cur);
+        const n = succ[cur];
+        if (!n) break;
+        cur = n;
+      }
+      // append any remaining not in order
+      for (const e of effectsList.map(x=>x.id)) if (!order.includes(e)) order.push(e);
+    } else {
+      // fallback to effectsList order
+      for (const e of effectsList) order.push(e.id);
+    }
+    setChainList(order);
+    AudioFX.setChain(order);
+  }
+
+  const paramRanges: Record<string, { min: number; max: number; step?: number }> = {
+    feedback: { min: 0, max: 1, step: 0.01 },
+    delayTime: { min: 1, max: 10000, step: 1 },
+    wetLevel: { min: 0, max: 2, step: 0.01 },
+    dryLevel: { min: 0, max: 2, step: 0.01 },
+    cutoff: { min: 20, max: 22050, step: 1 },
+    rate: { min: 0.01, max: 8, step: 0.01 },
+    depth: { min: 0, max: 1, step: 0.01 },
+    feedback: { min: 0, max: 1, step: 0.01 },
+    delay: { min: 0, max: 1, step: 0.0001 },
+    outputGain: { min: -42, max: 0, step: 0.1 },
+    drive: { min: 0, max: 1, step: 0.01 },
+    curveAmount: { min: 0, max: 1, step: 0.01 },
+    threshold: { min: -100, max: 0, step: 1 },
+    makeupGain: { min: 0, max: 20, step: 0.1 },
+    attack: { min: 0, max: 1000, step: 1 },
+    release: { min: 0, max: 3000, step: 1 },
+    ratio: { min: 1, max: 20, step: 0.1 },
+    knee: { min: 0, max: 40, step: 0.1 },
+    frequency: { min: 20, max: 22050, step: 1 },
+    Q: { min: 0.001, max: 100, step: 0.001 },
+    intensity: { min: 0, max: 1, step: 0.01 },
+    bits: { min: 1, max: 16, step: 1 },
+    normfreq: { min: 0, max: 1, step: 0.01 },
+    cutoff: { min: 0, max: 1, step: 0.001 },
+    bufferSize: { min: 256, max: 16384, step: 256 },
+    resonance: { min: 0, max: 4, step: 0.01 },
+  };
+  function muteMic() {
+    // mute both the local stream obtained via getUserMedia and any stream
+    // attached inside the Scribe connection (connectionRef.current._microphoneStream)
+    let muted = false;
+    try {
+      const local = localStreamRef.current;
+      if (local && local.getAudioTracks().length > 0) {
+        local.getAudioTracks().forEach((t) => (t.enabled = false));
+        muted = true;
+      }
+    } catch (e) {
+      logger.warn('Failed to mute localStreamRef', e);
+    }
+    try {
+      const micStream = connectionRef.current?._microphoneStream;
+      if (micStream && micStream.getAudioTracks().length > 0) {
+        micStream.getAudioTracks().forEach((track: MediaStreamTrack) => {
+          track.enabled = false;
+        });
+        muted = true;
+      }
+    } catch (e) {
+      logger.warn('Failed to mute connection microphone stream', e);
+    }
+    setMicMuted(muted);
   }
   function unmuteMic() {
-    const micStream = connectionRef.current?._microphoneStream;
-    if (micStream && micStream.getAudioTracks().length > 0) {
-      micStream.getAudioTracks().forEach((track: MediaStreamTrack) => {
-        track.enabled = true;
-      });
-      setMicMuted(false);
-    } else {
-      logger.warn('No Scribe microphone stream to unmute.');
-      setMicMuted(false); // UI feedback only
+    let unmuted = false;
+    try {
+      const local = localStreamRef.current;
+      if (local && local.getAudioTracks().length > 0) {
+        local.getAudioTracks().forEach((t) => (t.enabled = true));
+        unmuted = true;
+      }
+    } catch (e) {
+      logger.warn('Failed to unmute localStreamRef', e);
     }
+    try {
+      const micStream = connectionRef.current?._microphoneStream;
+      if (micStream && micStream.getAudioTracks().length > 0) {
+        micStream.getAudioTracks().forEach((track: MediaStreamTrack) => {
+          track.enabled = true;
+        });
+        unmuted = true;
+      }
+    } catch (e) {
+      logger.warn('Failed to unmute connection microphone stream', e);
+    }
+    setMicMuted(!unmuted);
   }
   // Play TTS audio for assistant response using <audio> element for reliability
   async function playAssistantTTS(text: string) {
@@ -62,6 +176,8 @@ export default function AudioChatClean() {
     }
     try {
       muteMic();
+      // mark that we're playing TTS so STT transcripts can be ignored
+      try { isPlayingTTSRef.current = true; } catch (e) {}
       logger.debug('[TTS] Mic muted, sending request to /api/tts');
       const pwHash = await hashPassword(apiPassword || "");
       const res = await fetch('/api/tts', {
@@ -80,10 +196,21 @@ export default function AudioChatClean() {
         const decoded = await ac.decodeAudioData(audioData.slice(0));
         const src = ac.createBufferSource();
         src.buffer = decoded;
+        // track active buffer source so Stop button can stop it
+        try { activeBufferSrcRef.current = src; } catch (e) {}
         // ensure destination exists
         const dest = outDestinationRef.current || ac.createMediaStreamDestination();
         outDestinationRef.current = dest;
-        src.connect(dest);
+        // connect source through user-configured effects chain
+        try {
+          AudioFX.initTuna(ac);
+          const inputGain = ac.createGain();
+          src.connect(inputGain);
+          // connect chain (effects) between inputGain and dest
+          AudioFX.asyncConnectChain(inputGain as unknown as AudioNode, dest as unknown as AudioNode);
+        } catch (e) {
+          src.connect(dest);
+        }
         // Do not connect to AudioContext destination to avoid duplicate playback.
         // The buffer is routed to a MediaStreamDestination and played via the
         // hidden audio element (`graphAudioRef`). Connecting to `ac.destination`
@@ -93,6 +220,9 @@ export default function AudioChatClean() {
         // When finished, unmute mic
         src.onended = () => {
           logger.debug('[TTS] AudioContext buffer ended, unmuting mic');
+          // clear active ref
+          try { if (activeBufferSrcRef.current === src) activeBufferSrcRef.current = null; } catch (e) {}
+          try { isPlayingTTSRef.current = false; } catch (e) {}
           unmuteMic();
         };
         // Ensure graphAudioRef is attached and sink applied
@@ -114,13 +244,14 @@ export default function AudioChatClean() {
           audioRef.current.src = url;
           audioRef.current.onended = () => {
             URL.revokeObjectURL(url);
+            try { isPlayingTTSRef.current = false; } catch (e) {}
             unmuteMic();
           };
-          try { await audioRef.current.play(); } catch (err) { logger.warn('Fallback element play failed', err); unmuteMic(); }
+          try { await audioRef.current.play(); } catch (err) { logger.warn('Fallback element play failed', err); try { isPlayingTTSRef.current = false; } catch (e) {} unmuteMic(); }
         } else {
           const audio = new Audio(url);
-          audio.onended = () => { URL.revokeObjectURL(url); unmuteMic(); };
-          try { await audio.play(); } catch (err) { logger.warn('Fallback Audio() play failed', err); unmuteMic(); }
+          audio.onended = () => { URL.revokeObjectURL(url); try { isPlayingTTSRef.current = false; } catch (e) {} unmuteMic(); };
+          try { await audio.play(); } catch (err) { logger.warn('Fallback Audio() play failed', err); try { isPlayingTTSRef.current = false; } catch (e) {} unmuteMic(); }
         }
       }
     } catch (err) {
@@ -134,6 +265,32 @@ export default function AudioChatClean() {
     (async () => {
       await refreshAudioOutputs();
       ensureGraphRouting();
+    })();
+
+    // initialize default effects once audioContext available
+    (async () => {
+      try {
+        const ac = audioContextRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
+        audioContextRef.current = ac;
+        AudioFX.initTuna(ac);
+        // create default effects (start bypassed)
+        const types = ['Delay','Phaser','Overdrive','Compressor','Filter','Tremolo','Bitcrusher','Chorus'];
+        const initial = types.map((t, i) => ({ id: `fx-${i}-${t}`, type: t }));
+        for (const it of initial) {
+          // pass bypass: true so effects load in bypassed state
+          AudioFX.createEffect(it.id, it.type, { bypass: true });
+        }
+        const initialEffects = initial.map((it) => ({ id: it.id, type: it.type, params: AudioFX.getEffects().find((e:any)=>e.id===it.id)?.params ?? {}, bypass: true }));
+        setEffectsList(initialEffects);
+        const ids = initial.map((it) => it.id);
+        setChainList(ids);
+        defaultChainRef.current = ids.slice();
+        // initialize default node positions in a 2 rows x 4 columns grid
+        // no node-graph positions required when using only the linear signal chain
+        AudioFX.setChain(initial.map((it) => it.id));
+      } catch (e) {
+        // ignore
+      }
     })();
 
     return () => {
@@ -210,7 +367,7 @@ export default function AudioChatClean() {
         languageCode: "en",
         commitStrategy: CommitStrategy.VAD,
         vadSilenceThresholdSecs: 1.5,
-        vadThreshold: 0.5,
+        vadThreshold: 0.7,
         minSpeechDurationMs: 250,
         minSilenceDurationMs: 250,
         includeTimestamps: false,
@@ -249,6 +406,12 @@ export default function AudioChatClean() {
         if (typeof data === 'object' && data !== null && 'text' in data) {
           const d = data as { text?: unknown };
           if (typeof d.text === 'string') text = d.text;
+        }
+        // If we're currently playing assistant TTS, ignore transcripts produced
+        // by the microphone (these are likely the assistant audio being picked up)
+        if (isPlayingTTSRef.current) {
+          logger.debug('Ignoring committed transcript while TTS is playing:', text);
+          return;
         }
         if (text) {
           setTranscript(text ?? "");
@@ -535,6 +698,13 @@ export default function AudioChatClean() {
       } catch (e) {
         logger.warn('Failed to set srcObject on graph audio element', e);
       }
+      // initialize Tuna
+      try {
+        AudioFX.initTuna(ac);
+      } catch (e) {
+        logger.debug('Tuna init failed or not available', e);
+      }
+
       // apply sink if supported
       if (supportsSetSinkId && selectedOutputId && (graphAudioRef.current as any).setSinkId) {
         try {
@@ -660,130 +830,248 @@ export default function AudioChatClean() {
       {/* Hidden audio element for TTS playback */}
       <audio ref={audioRef} style={{ display: 'none' }} />
       <h1 className="text-2xl font-bold">Nocturne AI</h1>
-      <div className="w-full max-w-xl bg-white p-4 rounded shadow">
-        <div className="flex gap-2 mb-2">
-          <button
-            onClick={micMuted ? unmuteMic : muteMic}
-            className={`px-3 py-1 rounded ${micMuted ? 'bg-gray-400 text-white' : 'bg-blue-600 text-white'}`}
-            disabled={!connected}
-          >
-            {micMuted ? 'Unmute Mic' : 'Mute Mic'}
-          </button>
-          <button
-            onClick={stopTTSPlayback}
-            className="px-3 py-1 rounded bg-red-400 text-white"
-            disabled={!connected}
-          >
-            Stop Audio
-          </button>
-          <span className={`text-sm ${micMuted ? 'text-red-600' : 'text-green-600'}`}>{micMuted ? 'Mic is muted' : 'Mic is live'}</span>
-        </div>
-        <div className="flex gap-3 items-center">
-          <button onClick={startRealtime} disabled={connected || elStatus === 'connecting' || oaiStatus === 'connecting'} className="px-4 py-2 bg-green-600 text-white rounded">Start Session</button>
-          <button onClick={stopRealtime} disabled={!connected} className="px-4 py-2 bg-red-500 text-white rounded">Stop Session</button>
-          <span className="ml-4 flex items-center gap-2">
-            <span className={
-              elStatus === 'connected' ? 'text-green-600' :
-              elStatus === 'connecting' ? 'text-yellow-600 animate-pulse' :
-              elStatus === 'error' ? 'text-red-600' : 'text-gray-400'
-            }>ElevenLabs: {elStatus.charAt(0).toUpperCase() + elStatus.slice(1)}</span>
-            <span className={
-              oaiStatus === 'connected' ? 'text-green-600' :
-              oaiStatus === 'connecting' ? 'text-yellow-600 animate-pulse' :
-              oaiStatus === 'error' ? 'text-red-600' : 'text-gray-400'
-            }>OpenAI: {oaiStatus.charAt(0).toUpperCase() + oaiStatus.slice(1)}</span>
-          </span>
-        </div>
-        <div className="mt-3">
-          <div className="flex items-center justify-between mb-2">
-            <div>
-              <label className="block text-sm font-medium mb-1">Output device</label>
-              <select
-                value={selectedOutputId}
-                onChange={async (e) => {
-                  const id = e.target.value;
-                  await applySelectedOutput(id);
-                }}
-                onClick={() => refreshAudioOutputs()}
-                className="p-2 border rounded text-sm mr-2"
-              >
-                {audioOutputs.length === 0 ? <option value="default">default</option> : null}
-                {audioOutputs.map((o) => (
-                  <option key={o.deviceId} value={o.deviceId}>{o.label || o.deviceId}</option>
-                ))}
-              </select>
-              <button onClick={() => refreshAudioOutputs()} className="text-xs text-blue-600 ml-2">Refresh</button>
-              {!supportsSetSinkId ? (
-                <div className="text-xs text-gray-500 mt-1">Note: Browser may not support per-tab output. Use system output or Chromium.</div>
-              ) : null}
+      <div className="w-full max-w-6xl flex flex-col md:flex-row items-start gap-6">
+        <div className="flex-1 max-w-xl bg-white p-4 rounded shadow">
+          <div className="flex gap-2 mb-2">
+            <button
+              onClick={micMuted ? unmuteMic : muteMic}
+              className={`px-3 py-1 rounded ${micMuted ? 'bg-gray-400 text-white' : 'bg-blue-600 text-white'}`}
+              disabled={!connected}
+            >
+              {micMuted ? 'Unmute Mic' : 'Mute Mic'}
+            </button>
+            <button
+              onClick={stopTTSPlayback}
+              className="px-3 py-1 rounded bg-red-400 text-white"
+              disabled={!connected}
+            >
+              Stop Audio
+            </button>
+            <span className={`text-sm ${micMuted ? 'text-red-600' : 'text-green-600'}`}>{micMuted ? 'Mic is muted' : 'Mic is live'}</span>
+          </div>
+          <div className="flex flex-col md:flex-row gap-3 md:items-center">
+            <div className="flex gap-3 items-center">
+              <button onClick={startRealtime} disabled={connected || elStatus === 'connecting' || oaiStatus === 'connecting'} className="px-4 py-2 bg-green-600 text-white rounded">Start Session</button>
+              <button onClick={stopRealtime} disabled={!connected} className="px-4 py-2 bg-red-500 text-white rounded">Stop Session</button>
+            </div>
+            <div className="flex items-center gap-2 md:ml-4">
+              <span className={
+                elStatus === 'connected' ? 'text-green-600' :
+                elStatus === 'connecting' ? 'text-yellow-600 animate-pulse' :
+                elStatus === 'error' ? 'text-red-600' : 'text-gray-400'
+              }>ElevenLabs: {elStatus.charAt(0).toUpperCase() + elStatus.slice(1)}</span>
+              <span className={
+                oaiStatus === 'connected' ? 'text-green-600' :
+                oaiStatus === 'connecting' ? 'text-yellow-600 animate-pulse' :
+                oaiStatus === 'error' ? 'text-red-600' : 'text-gray-400'
+              }>OpenAI: {oaiStatus.charAt(0).toUpperCase() + oaiStatus.slice(1)}</span>
             </div>
           </div>
-          <label className="block text-sm font-medium mb-1">API Password</label>
-          <input
-            type="password"
-            value={apiPassword}
-            onChange={(e) => setApiPassword(e.target.value)}
-            className="w-full p-2 border rounded mb-2"
-            placeholder="Enter API password"
-          />
-          <label className="block text-sm font-medium mb-1">Assistant Instructions</label>
-          <textarea
-            value={instruction}
-            onChange={(e) => setInstruction(e.target.value)}
-            rows={3}
-            className="w-full p-2 border rounded resize-none"
-            placeholder="Guidance for the assistant (system prompt)"
-          />
-        </div>
-      </div>
-      <div className="w-full max-w-xl bg-white p-4 rounded shadow mt-4">
-        <div className="flex items-center justify-between">
-          <strong>Live Transcript</strong>
-        </div>
-        <div className="mt-2 max-h-40 overflow-auto p-2 border rounded bg-gray-50 text-sm whitespace-pre-wrap">
-          {partialTranscript ? (
-            <div className="mb-2"><strong>Partial:</strong> <em>{partialTranscript}</em></div>
-          ) : null}
-          {transcript ? (
-            <div><strong>Committed:</strong> <em>{transcript}</em></div>
-          ) : (
-            <div className="text-gray-400">(no transcript)</div>
-          )}
-        </div>
-      </div>
-
-      <div className="w-full max-w-xl bg-white p-4 rounded shadow mt-4">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <strong>Assistant Response</strong>
-            <div className="min-h-[48px] mt-2 p-2 border rounded bg-gray-50 whitespace-pre-wrap">{assistantResponse || <span className="text-gray-400">(no response)</span>}</div>
-          </div>
-          {/* audio output selector removed from here and relocated to top settings for convenience */}
-        </div>
-      </div>
-      <div className="w-full max-w-xl bg-white p-4 rounded shadow mt-4">
-        <div className="flex items-center justify-between">
-          <strong>Transcript History</strong>
-          <button onClick={() => setTranscriptHistory([])} className="text-sm text-red-600">Clear</button>
-        </div>
-        <div
-          className="mt-2 max-h-48 overflow-y-auto overflow-x-hidden p-2 border rounded bg-gray-50"
-          role="region"
-          aria-label="Transcript history"
-          tabIndex={0}
-        >
-          {transcriptHistory.length === 0 ? (
-            <div className="text-gray-400">(no transcripts yet)</div>
-          ) : (
-            transcriptHistory.map((t, i) => (
-              <div key={i} className="mb-2">
-                <div className="text-xs text-gray-500">{i + 1} <span className={t.role === "user" ? "text-blue-600" : "text-green-600"}>[{t.role}]</span></div>
-                <div className="text-sm whitespace-pre-wrap">{t.text}</div>
+          <div className="mt-3">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <label className="block text-sm font-medium mb-1">Output device</label>
+                <select
+                  value={selectedOutputId}
+                  onChange={async (e) => {
+                    const id = e.target.value;
+                    await applySelectedOutput(id);
+                  }}
+                  onClick={() => refreshAudioOutputs()}
+                  className="p-2 border rounded text-sm mr-2"
+                >
+                  {audioOutputs.length === 0 ? <option value="default">default</option> : null}
+                  {audioOutputs.map((o) => (
+                    <option key={o.deviceId} value={o.deviceId}>{o.label || o.deviceId}</option>
+                  ))}
+                </select>
+                <button onClick={() => refreshAudioOutputs()} className="text-xs text-blue-600 ml-2">Refresh</button>
+                {!supportsSetSinkId ? (
+                  <div className="text-xs text-gray-500 mt-1">Note: Browser may not support per-tab output. Use system output or Chromium.</div>
+                ) : null}
               </div>
-            ))
-          )}
+            </div>
+            <label className="block text-sm font-medium mb-1">API Password</label>
+            <input
+              type="password"
+              value={apiPassword}
+              onChange={(e) => setApiPassword(e.target.value)}
+              className="w-full p-2 border rounded mb-2"
+              placeholder="Enter API password"
+            />
+            <label className="block text-sm font-medium mb-1">Assistant Instructions</label>
+            <textarea
+              value={instruction}
+              onChange={(e) => setInstruction(e.target.value)}
+              rows={3}
+              className="w-full p-2 border rounded resize-none"
+              placeholder="Guidance for the assistant (system prompt)"
+            />
+          </div>
+
+          <div className="mt-4 space-y-4">
+            <div className="w-full bg-white p-4 rounded shadow">
+              <div className="flex items-center justify-between">
+                <strong>Live Transcript</strong>
+              </div>
+              <div className="mt-2 max-h-40 overflow-auto p-2 border rounded bg-gray-50 text-sm whitespace-pre-wrap">
+                {partialTranscript ? (
+                  <div className="mb-2"><strong>Partial:</strong> <em>{partialTranscript}</em></div>
+                ) : null}
+                {transcript ? (
+                  <div><strong>Committed:</strong> <em>{transcript}</em></div>
+                ) : (
+                  <div className="text-gray-400">(no transcript)</div>
+                )}
+              </div>
+            </div>
+
+            <div className="w-full bg-white p-4 rounded shadow">
+              <div>
+                <strong>Assistant Response</strong>
+                <div className="min-h-[48px] mt-2 p-2 border rounded bg-gray-50 whitespace-pre-wrap">{assistantResponse || <span className="text-gray-400">(no response)</span>}</div>
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between">
+                <strong>Transcript History</strong>
+                <button onClick={() => setTranscriptHistory([])} className="text-sm text-red-600">Clear</button>
+              </div>
+              <div className="mt-2 max-h-48 overflow-y-auto overflow-x-hidden p-2 border rounded bg-gray-50" role="region" aria-label="Transcript history" tabIndex={0}>
+                {transcriptHistory.length === 0 ? (
+                  <div className="text-gray-400">(no transcripts yet)</div>
+                ) : (
+                  transcriptHistory.map((t, i) => (
+                    <div key={i} className="mb-2">
+                      <div className="text-xs text-gray-500">{i + 1} <span className={t.role === "user" ? "text-blue-600" : "text-green-600"}>[{t.role}]</span></div>
+                      <div className="text-sm whitespace-pre-wrap">{t.text}</div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="w-full md:w-96">
+          <div className="bg-white p-4 rounded shadow">
+            <div className="flex items-center justify-between">
+              <strong className="text-sm">Effects Palette</strong>
+              <div>
+                {/** Bypass all / Enable all toggle */}
+                <button
+                  onClick={() => {
+                    const allBypassed = effectsList.length > 0 && effectsList.every((f) => !!f.bypass);
+                    const setTo = !allBypassed;
+                    const next = effectsList.map((f) => ({ ...f, bypass: setTo }));
+                    setEffectsList(next);
+                    // apply to audiofx
+                    for (const f of next) {
+                      try { AudioFX.updateEffectParams(f.id, { bypass: setTo }); } catch (e) {}
+                    }
+                  }}
+                  className="text-xs px-2 py-1 border rounded"
+                >
+                  {effectsList.length > 0 && effectsList.every((f) => !!f.bypass) ? 'Enable All' : 'Bypass All'}
+                </button>
+              </div>
+            </div>
+            <div className="mt-2 grid grid-cols-2 grid-rows-4 gap-3">
+              {effectsList.map((fx, idx) => (
+                <div key={fx.id} className="p-2 border rounded bg-gray-50 text-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="font-medium">{fx.type}</div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-[11px]">Bypass</label>
+                      <input type="checkbox" checked={!!fx.bypass} onChange={(e)=>{ const v=e.target.checked; const nextEffects = effectsList.map(x=> x.id===fx.id?{...x,bypass:v}:x); setEffectsList(nextEffects); AudioFX.updateEffectParams(fx.id, { bypass: v }); }} />
+                    </div>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    {Object.keys(fx.params || {}).filter(k=> typeof (fx.params||{})[k] === 'number').slice(0,4).map((k) => {
+                      const v = (fx.params || {})[k] as number;
+                      const range = paramRanges[k] || { min: 0, max: 1, step: 0.01 };
+                      return (
+                        <div key={k} className="flex flex-col text-xs">
+                          <label className="mb-1">{k}</label>
+                          <input type="range" min={range.min} max={range.max} step={range.step || 0.01} value={v}
+                            onChange={(e)=>{ const nv = Number(e.target.value); const nextEffects = effectsList.map(x=> x.id===fx.id?{...x, params: {...x.params, [k]: nv}}:x); setEffectsList(nextEffects); AudioFX.updateEffectParams(fx.id, { [k]: nv }); }} />
+                          <div className="text-right text-[11px] text-gray-600">{String(v)}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Signal Chain moved to its own panel below the main area */}
+          </div>
         </div>
       </div>
+      {/* New horizontal Signal Chain panel below the main content */}
+      <div className="w-full max-w-6xl mt-4">
+        <div className="bg-white p-4 rounded shadow">
+          <div className="flex items-center justify-between">
+            <strong className="text-sm">Signal Chain</strong>
+            <div className="flex items-center gap-2">
+              <button onClick={() => { if (defaultChainRef.current) { setChainList(defaultChainRef.current); AudioFX.setChain(defaultChainRef.current); } }} className="text-xs px-2 py-1 border rounded">Reset Chain</button>
+              <button onClick={() => { setChainList([]); AudioFX.setChain([]); }} className="text-xs px-2 py-1 border rounded">Clear Chain</button>
+            </div>
+          </div>
+          <div className="mt-3 overflow-x-auto">
+            <div className="flex items-center gap-3">
+              {chainList.map((id, i) => {
+                const fx = effectsList.find((f) => f.id === id);
+                if (!fx) return null;
+                const moveLeft = () => {
+                  if (i <= 0) return;
+                  const next = chainList.slice();
+                  const [item] = next.splice(i, 1);
+                  next.splice(i-1, 0, item);
+                  setChainList(next);
+                  AudioFX.setChain(next);
+                };
+                const moveRight = () => {
+                  if (i >= chainList.length-1) return;
+                  const next = chainList.slice();
+                  const [item] = next.splice(i, 1);
+                  next.splice(i+1, 0, item);
+                  setChainList(next);
+                  AudioFX.setChain(next);
+                };
+                const onDragStart = (e: React.DragEvent) => { e.dataTransfer.setData('text/plain', id); e.dataTransfer.effectAllowed = 'move'; };
+                const onDragOver = (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
+                const onDrop = (e: React.DragEvent) => {
+                  e.preventDefault();
+                  const sid = e.dataTransfer.getData('text/plain');
+                  if (!sid) return;
+                  const from = chainList.indexOf(sid);
+                  const to = chainList.indexOf(id);
+                  if (from < 0 || to < 0) return;
+                  const next = chainList.slice();
+                  const [m] = next.splice(from, 1);
+                  next.splice(to, 0, m);
+                  setChainList(next);
+                  AudioFX.setChain(next);
+                };
+
+                return (
+                  <div key={id} draggable={true} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} className="min-w-[160px] p-2 border rounded bg-gray-50 flex flex-col items-center">
+                    <div className="flex items-center gap-3">
+                      <div className="font-medium">{fx.type}</div>
+                      <div className="text-xs text-gray-500">({i+1})</div>
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <button onClick={moveLeft} title="Move left" className="px-2 py-1 border rounded text-xs">◀</button>
+                      <button onClick={moveRight} title="Move right" className="px-2 py-1 border rounded text-xs">▶</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+      
     </div>
   );
 }
