@@ -46,7 +46,7 @@ export function useParamRanges(): Record<string, { min: number; max: number; ste
     knee: { min: 0, max: 40, step: 0.315 },
     automakeup: { min: 0, max: 1, step: 0.0079 },
     // Filter params
-    frequency: { min: 20, max: 22050, step: 173.5 },
+    frequency: { min: 20, max: 10000, step: 80 },
     Q: { min: 0.001, max: 100, step: 0.787 },
     gain: { min: -40, max: 40, step: 0.63 },
     // Tremolo params

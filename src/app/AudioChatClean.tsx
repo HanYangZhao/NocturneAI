@@ -170,7 +170,26 @@ export default function AudioChatClean() {
       try {
         const ac = audioContextRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
         audioContextRef.current = ac;
-        const decoded = await ac.decodeAudioData(audioData.slice(0));
+        let decoded = await ac.decodeAudioData(audioData.slice(0));
+        logger.debug('[TTS] Decoded audio channels:', decoded.numberOfChannels, 'sampleRate:', decoded.sampleRate);
+        
+        // Convert mono to stereo if needed (so stereoPhase effects work properly)
+        if (decoded.numberOfChannels === 1) {
+          const monoBuffer = decoded;
+          const stereoBuffer = ac.createAudioBuffer({
+            numberOfChannels: 2,
+            length: monoBuffer.length,
+            sampleRate: monoBuffer.sampleRate,
+          });
+          const monoData = monoBuffer.getChannelData(0);
+          const leftData = stereoBuffer.getChannelData(0);
+          const rightData = stereoBuffer.getChannelData(1);
+          leftData.set(monoData);
+          rightData.set(monoData);
+          decoded = stereoBuffer;
+          logger.debug('[TTS] Converted mono buffer to stereo');
+        }
+        
         const src = ac.createBufferSource();
         src.buffer = decoded;
         // track active buffer source so Stop button can stop it

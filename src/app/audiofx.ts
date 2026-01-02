@@ -44,7 +44,7 @@ export function initTuna(ac: AudioContext) {
 
 const defaultParamsByType: Record<string, any> = {
   Delay: { feedback: 0.45, delayTime: 100, wetLevel: 0.5, dryLevel: 1, cutoff: 20000, bypass: false },
-  Phaser: { rate: 0.1, depth: 0.6, feedback: 0.7, stereoPhase: 40, baseModulationFrequency: 700, bypass: false },
+  Phaser: { rate: 0.1, depth: 0.6, feedback: 0.7, stereoPhase: 20, baseModulationFrequency: 700, bypass: false },
   Overdrive: { outputGain: -9.154, drive: 0.197, curveAmount: 0.979, algorithmIndex: 0, bypass: false },
   Compressor: { threshold: -20, makeupGain: 1, attack: 1, release: 250, ratio: 4, knee: 5, automakeup: false, bypass: false },
   Filter: { frequency: 800, Q: 1, gain: 0, filterType: 'lowpass', bypass: false },
