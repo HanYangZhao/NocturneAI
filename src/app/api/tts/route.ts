@@ -14,13 +14,15 @@ export async function POST(req: NextRequest) {
   }
   const body = await req.json();
   const text = body.text as string | undefined;
+  const voiceId = body.voiceId as string | undefined;
   if (!text) {
     return new Response(JSON.stringify({ error: "Missing text" }), { status: 400, headers: { "Content-Type": "application/json" } });
   }
 
   const elevenKey = process.env.ELEVENLABS_API_KEY;
-  const voiceId = process.env.ELEVENLABS_VOICE_ID;
-  if (!elevenKey || !voiceId) {
+  // voiceId can be provided in the request body, or fall back to env variable
+  const effectiveVoiceId = voiceId || process.env.ELEVENLABS_VOICE_ID;
+  if (!elevenKey || !effectiveVoiceId) {
     return new Response(JSON.stringify({ error: "Missing ElevenLabs config" }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
 
@@ -28,7 +30,7 @@ export async function POST(req: NextRequest) {
 
   // Use the SDK to stream and collect audio chunks
   try {
-    const audioStream = await client.textToSpeech.stream(voiceId, {
+    const audioStream = await client.textToSpeech.stream(effectiveVoiceId, {
       modelId: "eleven_flash_v2_5",
       text,
       outputFormat: "mp3_44100_128",
