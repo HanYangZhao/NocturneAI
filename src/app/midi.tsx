@@ -2,6 +2,65 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import * as AudioFX from "./audiofx";
+import logger from "./logger";
+import * as ExportImport from "./exportImport";
+
+// Utility to format numeric values for display
+export function formatNumericValue(n: unknown): string {
+  if (typeof n !== 'number' || Number.isNaN(n)) return String(n);
+  if (Number.isInteger(n)) return String(n);
+  return parseFloat(n.toFixed(4)).toString();
+}
+
+// Available effect types
+export const EFFECT_TYPES = ['Delay', 'Phaser', 'Overdrive', 'Compressor', 'Filter', 'Tremolo', 'Bitcrusher', 'Chorus'] as const;
+
+// Filter type options for Filter effect
+export const FILTER_TYPES = ['lowpass', 'highpass', 'bandpass', 'lowshelf', 'highshelf', 'peaking', 'notch', 'allpass'] as const;
+
+// Centralized param ranges for all effects
+export function useParamRanges(): Record<string, { min: number; max: number; step?: number }> {
+  return {
+    // Delay params
+    feedback: { min: 0, max: 1, step: 0.0079 },
+    delayTime: { min: 1, max: 3000, step: 23.6 },
+    wetLevel: { min: 0, max: 2, step: 0.0157 },
+    dryLevel: { min: 0, max: 2, step: 0.0157 },
+    cutoff: { min: 20, max: 10000, step: 78.6 },
+    // Phaser params
+    rate: { min: 0.01, max: 8, step: 0.063 },
+    depth: { min: 0, max: 1, step: 0.0079 },
+    stereoPhase: { min: 0, max: 180, step: 1.42 },
+    baseModulationFrequency: { min: 200, max: 1500, step: 10.2 },
+    // Overdrive params
+    outputGain: { min: -42, max: 0, step: 0.33 },
+    drive: { min: 0, max: 1, step: 0.0079 },
+    curveAmount: { min: 0, max: 1, step: 0.0079 },
+    algorithmIndex: { min: 0, max: 5, step: 0.039 },
+    // Compressor params
+    threshold: { min: -100, max: 0, step: 0.79 },
+    makeupGain: { min: 0, max: 20, step: 0.157 },
+    attack: { min: 0, max: 1000, step: 7.87 },
+    release: { min: 0, max: 3000, step: 23.6 },
+    ratio: { min: 1, max: 20, step: 0.15 },
+    knee: { min: 0, max: 40, step: 0.315 },
+    automakeup: { min: 0, max: 1, step: 0.0079 },
+    // Filter params
+    frequency: { min: 20, max: 22050, step: 173.5 },
+    Q: { min: 0.001, max: 100, step: 0.787 },
+    gain: { min: -40, max: 40, step: 0.63 },
+    // Tremolo params
+    intensity: { min: 0, max: 1, step: 0.0079 },
+    // Bitcrusher params
+    bits: { min: 1, max: 16, step: 1 },
+    normfreq: { min: 0, max: 1, step: 0.0079 },
+    bufferSize: { min: 256, max: 16384, step: 127 },
+    // Chorus params
+    delay: { min: 0, max: 1, step: 0.0079 },
+    // Legacy/other
+    resonance: { min: 0, max: 4, step: 0.0315 },
+  };
+}
 
 type MidiControllerProps = {
   paramLabels?: string[]; // optional labels for the 32 params
@@ -11,7 +70,7 @@ type MidiControllerProps = {
 const STORAGE_KEY = "nocturne_midi_mappings_v1";
 
 export default function MidiController({ paramLabels = [], onMidiCC }: MidiControllerProps) {
-  const DEFAULT_COUNT = 32;
+  const DEFAULT_COUNT = 33;
   const initialLabels = Array.from({ length: DEFAULT_COUNT }, (_, i) => paramLabels[i] ?? `Param ${i + 1}`);
 
   // mapping slots: each slot can have assignedCC (number|null) and targets array [{ effectId, paramKey }]
@@ -22,7 +81,14 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed.mappings)) return parsed.mappings.slice(0, DEFAULT_COUNT).map((v: any) => ({ assignedCC: typeof v.assignedCC === 'number' ? v.assignedCC : null, targets: Array.isArray(v.targets) ? v.targets : [] }));
+        if (Array.isArray(parsed.mappings)) {
+          const loaded = parsed.mappings.slice(0, DEFAULT_COUNT).map((v: any) => ({ assignedCC: typeof v.assignedCC === 'number' ? v.assignedCC : null, targets: Array.isArray(v.targets) ? v.targets : [] }));
+          // Pad to DEFAULT_COUNT if needed
+          while (loaded.length < DEFAULT_COUNT) {
+            loaded.push({ assignedCC: null, targets: [] });
+          }
+          return loaded;
+        }
       }
     } catch (e) {}
     return Array.from({ length: DEFAULT_COUNT }, () => ({ assignedCC: null as number | null, targets: [] as Array<{ effectId: string; paramKey: string }> }));
@@ -46,34 +112,8 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
   const listeningRef = useRef<number | null>(null); // index we're learning
   const [flashSlots, setFlashSlots] = useState<Record<number, boolean>>({});
 
-  // Param ranges (duplicate of app ranges) - used to map 0..127 to param ranges
-  const paramRanges: Record<string, { min: number; max: number; step?: number }> = {
-    feedback: { min: 0, max: 1, step: 0.01 },
-    delayTime: { min: 1, max: 3000, step: 1 },
-    wetLevel: { min: 0, max: 2, step: 0.01 },
-    dryLevel: { min: 0, max: 2, step: 0.01 },
-    cutoff: { min: 20, max: 10000, step: 1 },
-    rate: { min: 0.01, max: 8, step: 0.01 },
-    depth: { min: 0, max: 1, step: 0.01 },
-    outputGain: { min: -42, max: 0, step: 0.1 },
-    drive: { min: 0, max: 1, step: 0.01 },
-    curveAmount: { min: 0, max: 1, step: 0.01 },
-    threshold: { min: -100, max: 0, step: 1 },
-    makeupGain: { min: 0, max: 20, step: 0.1 },
-    attack: { min: 0, max: 1000, step: 1 },
-    release: { min: 0, max: 3000, step: 1 },
-    ratio: { min: 1, max: 20, step: 0.1 },
-    knee: { min: 0, max: 40, step: 0.1 },
-    frequency: { min: 20, max: 22050, step: 1 },
-    Q: { min: 0.001, max: 100, step: 0.001 },
-    intensity: { min: 0, max: 1, step: 0.01 },
-    bits: { min: 1, max: 16, step: 1 },
-    normfreq: { min: 0, max: 1, step: 0.01 },
-    resonance: { min: 0, max: 4, step: 0.01 },
-    bufferSize: { min: 256, max: 16384, step: 256 },
-    delay: { min: 0, max: 1, step: 0.0001 },
-    feedback_chorus: { min: 0, max: 1, step: 0.01 },
-  };
+  // Param ranges - used to map 0..127 to param ranges
+  const paramRanges = useParamRanges();
 
   useEffect(() => {
     // persist settings
@@ -123,19 +163,14 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
     for (const eff of effects) {
       const keys = Object.keys(eff.params || {}).filter(k => typeof (eff.params || {})[k] === 'number');
       for (const k of keys) {
-        // prioritize Delay.cutoff so it appears early in the candidate list
-        if (eff.type === 'Delay' && k === 'cutoff') {
-          candidates.unshift({ effectId: eff.id, paramKey: k });
-        } else {
-          candidates.push({ effectId: eff.id, paramKey: k });
-        }
+        candidates.push({ effectId: eff.id, paramKey: k });
       }
     }
     if (candidates.length === 0) return;
     const next = mappings.slice();
     for (let i = 0; i < next.length && i < candidates.length; i++) {
-      // assign a default CC number equal to the slot index (0-31)
-      next[i] = { assignedCC: i, targets: [candidates[i]] };
+      // assign a default CC number from 1-33
+      next[i] = { assignedCC: i + 1, targets: [candidates[i]] };
     }
     setMappings(next);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -172,7 +207,11 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
               if (!eff) continue;
               const paramName = t.paramKey;
               const range = paramRanges[paramName] || { min: 0, max: 1 };
-              const mapped = range.min + (val / 127) * (range.max - range.min);
+              let mapped = range.min + (val / 127) * (range.max - range.min);
+              // Cast integer params to int
+              if (paramName === 'bits' || paramName === 'algorithmIndex' || paramName === 'automakeup') {
+                mapped = Math.round(mapped);
+              }
               // call AudioFX.updateEffectParams
               try {
                 AudioFX.updateEffectParams(t.effectId, { [paramName]: mapped });
@@ -334,6 +373,74 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
         </div>
       </div>
       <div className="mt-2 text-xs text-gray-600">Tip: click Learn, then move a controller to assign its CC to that parameter. Channel can be set to Any or 1–16.</div>
+      <div className="mt-3 flex gap-2 flex-wrap">
+        <button
+          onClick={async () => {
+            try {
+              const json = JSON.stringify({
+                version: '1.0',
+                timestamp: new Date().toISOString(),
+                mappings,
+                channel,
+              }, null, 2);
+              await ExportImport.copyConfigToClipboard(
+                ExportImport.exportConfig([], mappings, channel)
+              );
+              alert('MIDI mappings copied to clipboard!');
+            } catch (e) {
+              alert('Failed to copy: ' + (e instanceof Error ? e.message : String(e)));
+            }
+          }}
+          className="px-2 py-1 border rounded text-xs bg-blue-50 hover:bg-blue-100"
+        >
+          📋 Copy
+        </button>
+        <button
+          onClick={async () => {
+            try {
+              const json = await ExportImport.loadConfigFromClipboard();
+              const config = ExportImport.importConfig(json);
+              setMappings(config.midiMappings);
+              setChannel(config.midiChannel);
+              alert('MIDI mappings loaded from clipboard!');
+            } catch (e) {
+              alert('Failed to paste: ' + (e instanceof Error ? e.message : String(e)));
+            }
+          }}
+          className="px-2 py-1 border rounded text-xs bg-green-50 hover:bg-green-100"
+        >
+          📌 Paste
+        </button>
+        <button
+          onClick={async () => {
+            try {
+              const config = ExportImport.exportConfig([], mappings, channel);
+              ExportImport.downloadConfigAsFile(config, `nocturne-midi-${new Date().toISOString().split('T')[0]}.json`);
+            } catch (e) {
+              alert('Failed to export: ' + (e instanceof Error ? e.message : String(e)));
+            }
+          }}
+          className="px-2 py-1 border rounded text-xs bg-purple-50 hover:bg-purple-100"
+        >
+          💾 Export
+        </button>
+        <button
+          onClick={async () => {
+            try {
+              const json = await ExportImport.loadConfigFromFile();
+              const config = ExportImport.importConfig(json);
+              setMappings(config.midiMappings);
+              setChannel(config.midiChannel);
+              alert('MIDI mappings loaded from file!');
+            } catch (e) {
+              alert('Failed to import: ' + (e instanceof Error ? e.message : String(e)));
+            }
+          }}
+          className="px-2 py-1 border rounded text-xs bg-orange-50 hover:bg-orange-100"
+        >
+          📂 Import
+        </button>
+      </div>
     </div>
   );
 }
