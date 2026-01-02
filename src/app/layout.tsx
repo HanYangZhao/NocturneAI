@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -30,7 +31,19 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {children}
+        <header className="w-full bg-white border-b">
+          <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Link href="/" className="font-semibold">Nocturne AI</Link>
+              <nav className="flex items-center gap-2 text-sm">
+                <Link href="/">Home</Link>
+                <Link href="/midi-map" className="px-2 py-1 border rounded text-xs">MIDI Mapper</Link>
+              </nav>
+            </div>
+            <div className="text-xs text-gray-500">v0.1</div>
+          </div>
+        </header>
+        <main className="max-w-6xl mx-auto p-4">{children}</main>
       </body>
     </html>
   );

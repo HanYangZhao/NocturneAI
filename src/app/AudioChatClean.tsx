@@ -5,9 +5,12 @@
   import React, { useEffect, useRef, useState } from "react";
   import logger from "./logger";
   import * as AudioFX from "./audiofx";
+  import * as ExportImport from "./exportImport";
   import { RealtimeEvents, CommitStrategy } from "@elevenlabs/client";
   import { ScribeRealtime as Scribe } from "./scribe/scribe";
   import type { RealtimeConnection } from "./scribe/connection";
+  import { useParamRanges, formatNumericValue, EFFECT_TYPES, FILTER_TYPES } from "./midi";
+  import MidiController from "./midi";
 
 export default function AudioChatClean() {
       // Stop TTS audio playback
@@ -56,6 +59,8 @@ export default function AudioChatClean() {
   const [effectsList, setEffectsList] = useState<Array<{ id: string; type: string; params: any; bypass?: boolean }>>([]);
   const [chainList, setChainList] = useState<string[]>([]);
   const defaultChainRef = useRef<string[] | null>(null);
+  const paramRanges = useParamRanges();
+  const [showMidiController, setShowMidiController] = useState(false);
 
   function computeChainFromConnections(conns: Array<{ from: string; to: string }>) {
     // build successor map (keep first successor if multiple)
@@ -89,34 +94,6 @@ export default function AudioChatClean() {
     AudioFX.setChain(order);
   }
 
-  const paramRanges: Record<string, { min: number; max: number; step?: number }> = {
-    feedback: { min: 0, max: 1, step: 0.01 },
-    delayTime: { min: 1, max: 10000, step: 1 },
-    wetLevel: { min: 0, max: 2, step: 0.01 },
-    dryLevel: { min: 0, max: 2, step: 0.01 },
-    cutoff: { min: 20, max: 22050, step: 1 },
-    rate: { min: 0.01, max: 8, step: 0.01 },
-    depth: { min: 0, max: 1, step: 0.01 },
-    feedback: { min: 0, max: 1, step: 0.01 },
-    delay: { min: 0, max: 1, step: 0.0001 },
-    outputGain: { min: -42, max: 0, step: 0.1 },
-    drive: { min: 0, max: 1, step: 0.01 },
-    curveAmount: { min: 0, max: 1, step: 0.01 },
-    threshold: { min: -100, max: 0, step: 1 },
-    makeupGain: { min: 0, max: 20, step: 0.1 },
-    attack: { min: 0, max: 1000, step: 1 },
-    release: { min: 0, max: 3000, step: 1 },
-    ratio: { min: 1, max: 20, step: 0.1 },
-    knee: { min: 0, max: 40, step: 0.1 },
-    frequency: { min: 20, max: 22050, step: 1 },
-    Q: { min: 0.001, max: 100, step: 0.001 },
-    intensity: { min: 0, max: 1, step: 0.01 },
-    bits: { min: 1, max: 16, step: 1 },
-    normfreq: { min: 0, max: 1, step: 0.01 },
-    cutoff: { min: 0, max: 1, step: 0.001 },
-    bufferSize: { min: 256, max: 16384, step: 256 },
-    resonance: { min: 0, max: 4, step: 0.01 },
-  };
   function muteMic() {
     // mute both the local stream obtained via getUserMedia and any stream
     // attached inside the Scribe connection (connectionRef.current._microphoneStream)
@@ -193,7 +170,26 @@ export default function AudioChatClean() {
       try {
         const ac = audioContextRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
         audioContextRef.current = ac;
-        const decoded = await ac.decodeAudioData(audioData.slice(0));
+        let decoded = await ac.decodeAudioData(audioData.slice(0));
+        logger.debug('[TTS] Decoded audio channels:', decoded.numberOfChannels, 'sampleRate:', decoded.sampleRate);
+        
+        // Convert mono to stereo if needed (so stereoPhase effects work properly)
+        if (decoded.numberOfChannels === 1) {
+          const monoBuffer = decoded;
+          const stereoBuffer = ac.createBuffer(
+            2,
+            monoBuffer.length,
+            monoBuffer.sampleRate,
+          );
+          const monoData = monoBuffer.getChannelData(0);
+          const leftData = stereoBuffer.getChannelData(0);
+          const rightData = stereoBuffer.getChannelData(1);
+          leftData.set(monoData);
+          rightData.set(monoData);
+          decoded = stereoBuffer;
+          logger.debug('[TTS] Converted mono buffer to stereo');
+        }
+        
         const src = ac.createBufferSource();
         src.buffer = decoded;
         // track active buffer source so Stop button can stop it
@@ -274,8 +270,7 @@ export default function AudioChatClean() {
         audioContextRef.current = ac;
         AudioFX.initTuna(ac);
         // create default effects (start bypassed)
-        const types = ['Delay','Phaser','Overdrive','Compressor','Filter','Tremolo','Bitcrusher','Chorus'];
-        const initial = types.map((t, i) => ({ id: `fx-${i}-${t}`, type: t }));
+        const initial = EFFECT_TYPES.map((t, i) => ({ id: `fx-${i}-${t}`, type: t }));
         for (const it of initial) {
           // pass bypass: true so effects load in bypassed state
           AudioFX.createEffect(it.id, it.type, { bypass: true });
@@ -309,6 +304,21 @@ export default function AudioChatClean() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Refresh effectsList when external updates occur (e.g., MIDI mapped CCs)
+  useEffect(() => {
+    function handler(ev: any) {
+      try {
+        const ef = AudioFX.getEffects() || [];
+        const next = ef.map((e: any) => ({ id: e.id, type: e.type, params: e.params || {}, bypass: !!(e.params && e.params.bypass) }));
+        setEffectsList(next);
+      } catch (e) {
+        // ignore
+      }
+    }
+    window.addEventListener('audiofx:paramsUpdated', handler as EventListener);
+    return () => { window.removeEventListener('audiofx:paramsUpdated', handler as EventListener); };
   }, []);
 
   async function hashPassword(pw: string) {
@@ -655,6 +665,12 @@ export default function AudioChatClean() {
   // Enumerate audio output devices and detect setSinkId support
   async function refreshAudioOutputs() {
     try {
+      // Check if navigator.mediaDevices is available (not in SSR or unsupported environments)
+      if (!navigator?.mediaDevices) {
+        logger.debug('mediaDevices not available in this environment');
+        return;
+      }
+
       // Ensure permissions so labels are available
       try {
         await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -957,7 +973,13 @@ export default function AudioChatClean() {
           <div className="bg-white p-4 rounded shadow">
             <div className="flex items-center justify-between">
               <strong className="text-sm">Effects Palette</strong>
-              <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => setShowMidiController(!showMidiController)}
+                  className="text-xs px-2 py-1 border rounded hover:bg-blue-50"
+                >
+                  MIDI CC
+                </button>
                 {/** Bypass all / Enable all toggle */}
                 <button
                   onClick={() => {
@@ -974,6 +996,68 @@ export default function AudioChatClean() {
                 >
                   {effectsList.length > 0 && effectsList.every((f) => !!f.bypass) ? 'Enable All' : 'Bypass All'}
                 </button>
+                {/** Export / Import buttons */}
+                <button
+                  onClick={async () => {
+                    try {
+                      // Also load MIDI mappings from localStorage if available
+                      let midiMappings = undefined;
+                      let midiChannel = undefined;
+                      try {
+                        const raw = localStorage.getItem("nocturne_midi_mappings_v1");
+                        if (raw) {
+                          const parsed = JSON.parse(raw);
+                          midiMappings = parsed.mappings;
+                          midiChannel = parsed.channel;
+                        }
+                      } catch (e) {}
+                      const config = ExportImport.exportConfig(effectsList, midiMappings, midiChannel);
+                      ExportImport.downloadConfigAsFile(config, `nocturne-effects-${new Date().toISOString().split('T')[0]}.json`);
+                    } catch (e) {
+                      alert('Failed to export: ' + (e instanceof Error ? e.message : String(e)));
+                    }
+                  }}
+                  className="text-xs px-2 py-1 border rounded bg-purple-50 hover:bg-purple-100"
+                >
+                  Export Config
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      const json = await ExportImport.loadConfigFromFile();
+                      const config = ExportImport.importConfig(json);
+                      const next = config.effects.map((e) => {
+                        const existing = effectsList.find((f) => f.id === e.id);
+                        if (!existing) return e;
+                        return { ...e, id: existing.id };
+                      });
+                      setEffectsList(next);
+                      for (const f of next) {
+                        try {
+                          AudioFX.updateEffectParams(f.id, f.params);
+                          if (f.bypass !== undefined) {
+                            AudioFX.updateEffectParams(f.id, { bypass: f.bypass });
+                          }
+                        } catch (e) {}
+                      }
+                      // Also restore MIDI mappings if present
+                      if (config.midiMappings && config.midiMappings.length > 0) {
+                        try {
+                          localStorage.setItem("nocturne_midi_mappings_v1", JSON.stringify({
+                            mappings: config.midiMappings,
+                            channel: config.midiChannel,
+                          }));
+                        } catch (e) {}
+                      }
+                      alert('Effects config loaded from file!' + (config.midiMappings?.length ? ' MIDI mappings also restored.' : ''));
+                    } catch (e) {
+                      alert('Failed to import: ' + (e instanceof Error ? e.message : String(e)));
+                    }
+                  }}
+                  className="text-xs px-2 py-1 border rounded bg-orange-50 hover:bg-orange-100"
+                >
+                  Import Config
+                </button>
               </div>
             </div>
             <div className="mt-2 grid grid-cols-2 grid-rows-4 gap-3">
@@ -987,15 +1071,40 @@ export default function AudioChatClean() {
                     </div>
                   </div>
                   <div className="mt-2 grid grid-cols-2 gap-2">
-                    {Object.keys(fx.params || {}).filter(k=> typeof (fx.params||{})[k] === 'number').slice(0,4).map((k) => {
-                      const v = (fx.params || {})[k] as number;
-                      const range = paramRanges[k] || { min: 0, max: 1, step: 0.01 };
+                    {Object.keys(fx.params || {}).slice(0,6).map((k) => {
+                      // Hide internal/bypass param since we expose a dedicated checkbox
+                      if (k === 'bypass') return null;
+                      const val = (fx.params || {})[k];
+                      // numeric params -> slider
+                      if (typeof val === 'number') {
+                        const v = val as number;
+                        const range = paramRanges[k] || { min: 0, max: 1, step: 0.01 };
+                        return (
+                          <div key={k} className="flex flex-col text-xs">
+                            <label className="mb-1">{k}</label>
+                            <input type="range" min={range.min} max={range.max} step={range.step || 0.01} value={v}
+                              onChange={(e)=>{ const nv = Number(e.target.value); const nextEffects = effectsList.map(x=> x.id===fx.id?{...x, params: {...x.params, [k]: nv}}:x); setEffectsList(nextEffects); AudioFX.updateEffectParams(fx.id, { [k]: nv }); }} />
+                            <div className="text-right text-[11px] text-gray-600">{formatNumericValue(v)}</div>
+                          </div>
+                        );
+                      }
+                      // filterType select for Filter effect
+                      if (fx.type === 'Filter' && k === 'filterType') {
+                        const v = String(val || '');
+                        return (
+                          <div key={k} className="flex flex-col text-xs">
+                            <label className="mb-1">{k}</label>
+                            <select className="p-1 text-xs border" value={v} onChange={(e) => { const nv = e.target.value; const nextEffects = effectsList.map(x=> x.id===fx.id?{...x, params: {...x.params, [k]: nv}}:x); setEffectsList(nextEffects); AudioFX.updateEffectParams(fx.id, { [k]: nv }); }}>
+                              {FILTER_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                          </div>
+                        );
+                      }
+                      // fallback: show value as text (read-only)
                       return (
                         <div key={k} className="flex flex-col text-xs">
                           <label className="mb-1">{k}</label>
-                          <input type="range" min={range.min} max={range.max} step={range.step || 0.01} value={v}
-                            onChange={(e)=>{ const nv = Number(e.target.value); const nextEffects = effectsList.map(x=> x.id===fx.id?{...x, params: {...x.params, [k]: nv}}:x); setEffectsList(nextEffects); AudioFX.updateEffectParams(fx.id, { [k]: nv }); }} />
-                          <div className="text-right text-[11px] text-gray-600">{String(v)}</div>
+                          <div className="p-1 text-xs text-gray-700 border">{String(val)}</div>
                         </div>
                       );
                     })}
@@ -1003,6 +1112,25 @@ export default function AudioChatClean() {
                 </div>
               ))}
             </div>
+            {/* MIDI Controller Modal */}
+            {showMidiController && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-auto">
+                  <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white">
+                    <strong className="text-lg">MIDI CC Mapper</strong>
+                    <button
+                      onClick={() => setShowMidiController(false)}
+                      className="text-2xl font-bold text-gray-500 hover:text-gray-700"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className="p-4">
+                    <MidiController />
+                  </div>
+                </div>
+              </div>
+            )}
             {/* Signal Chain moved to its own panel below the main area */}
           </div>
         </div>
