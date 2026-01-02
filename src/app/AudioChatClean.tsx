@@ -176,11 +176,11 @@ export default function AudioChatClean() {
         // Convert mono to stereo if needed (so stereoPhase effects work properly)
         if (decoded.numberOfChannels === 1) {
           const monoBuffer = decoded;
-          const stereoBuffer = ac.createAudioBuffer({
-            numberOfChannels: 2,
-            length: monoBuffer.length,
-            sampleRate: monoBuffer.sampleRate,
-          });
+          const stereoBuffer = ac.createBuffer(
+            2,
+            monoBuffer.length,
+            monoBuffer.sampleRate,
+          );
           const monoData = monoBuffer.getChannelData(0);
           const leftData = stereoBuffer.getChannelData(0);
           const rightData = stereoBuffer.getChannelData(1);
@@ -665,6 +665,12 @@ export default function AudioChatClean() {
   // Enumerate audio output devices and detect setSinkId support
   async function refreshAudioOutputs() {
     try {
+      // Check if navigator.mediaDevices is available (not in SSR or unsupported environments)
+      if (!navigator?.mediaDevices) {
+        logger.debug('mediaDevices not available in this environment');
+        return;
+      }
+
       // Ensure permissions so labels are available
       try {
         await navigator.mediaDevices.getUserMedia({ audio: true });
