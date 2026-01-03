@@ -11,6 +11,9 @@
   import type { RealtimeConnection } from "./scribe/connection";
   import { useParamRanges, formatNumericValue, EFFECT_TYPES, FILTER_TYPES } from "./midi";
   import MidiController from "./midi";
+  import { AudioMixer, type VoiceChannel } from "./audioMixer";
+  import voicesConfig from "./voices.json";
+  import TriangleMixer from "./TriangleMixer";
 
 export default function AudioChatClean() {
       // Stop TTS audio playback
@@ -35,6 +38,14 @@ export default function AudioChatClean() {
           }
         } catch (e) {
           // ignore
+        }
+        // Stop all mixer channels
+        if (audioMixerRef.current) {
+          try {
+            audioMixerRef.current.stopAll();
+          } catch (e) {
+            logger.warn('[TTS] Failed to stop mixer channels', e);
+          }
         }
           try { isPlayingTTSRef.current = false; } catch (e) {}
         logger.info('[TTS] Audio playback stopped by user');
@@ -61,6 +72,11 @@ export default function AudioChatClean() {
   const defaultChainRef = useRef<string[] | null>(null);
   const paramRanges = useParamRanges();
   const [showMidiController, setShowMidiController] = useState(false);
+  
+  // Audio mixer for multiple voice playback
+  const audioMixerRef = useRef<AudioMixer | null>(null);
+  const [voiceChannels, setVoiceChannels] = useState<VoiceChannel[]>([]);
+  const [voices] = useState(voicesConfig.voices);
 
   function computeChainFromConnections(conns: Array<{ from: string; to: string }>) {
     // build successor map (keep first successor if multiple)
@@ -144,7 +160,7 @@ export default function AudioChatClean() {
     }
     setMicMuted(!unmuted);
   }
-  // Play TTS audio for assistant response using <audio> element for reliability
+  // Play TTS audio for assistant response - supports multiple concurrent voices
   async function playAssistantTTS(text: string) {
     logger.info('[TTS] playAssistantTTS called with text:', text);
     if (!text || !text.trim()) {
@@ -155,103 +171,139 @@ export default function AudioChatClean() {
       muteMic();
       // mark that we're playing TTS so STT transcripts can be ignored
       try { isPlayingTTSRef.current = true; } catch (e) {}
-      logger.debug('[TTS] Mic muted, sending request to /api/tts');
+      logger.debug('[TTS] Mic muted, preparing multi-voice TTS requests');
+      
       const pwHash = await hashPassword(apiPassword || "");
-      const res = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-password': pwHash },
-        body: JSON.stringify({ text }),
-      });
-      logger.debug('[TTS] /api/tts response status:', res.status);
-      if (!res.ok) throw new Error('TTS request failed');
-      const audioData = await res.arrayBuffer();
-      logger.debug('[TTS] Received audio data, byteLength:', audioData.byteLength);
-      // Route TTS through AudioContext -> MediaStreamDestination so it uses the selected output
+      const ac = audioContextRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioContextRef.current = ac;
+      
+      // Ensure destination exists
+      const dest = outDestinationRef.current || ac.createMediaStreamDestination();
+      outDestinationRef.current = dest;
+      
+      // Initialize mixer if not already created
+      if (!audioMixerRef.current) {
+        audioMixerRef.current = new AudioMixer(ac, dest);
+        logger.debug('[TTS] Audio mixer initialized');
+      }
+      
+      // Connect mixer master output through effects chain to destination
       try {
-        const ac = audioContextRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
-        audioContextRef.current = ac;
-        let decoded = await ac.decodeAudioData(audioData.slice(0));
-        logger.debug('[TTS] Decoded audio channels:', decoded.numberOfChannels, 'sampleRate:', decoded.sampleRate);
-        
-        // Convert mono to stereo if needed (so stereoPhase effects work properly)
-        if (decoded.numberOfChannels === 1) {
-          const monoBuffer = decoded;
-          const stereoBuffer = ac.createBuffer(
-            2,
-            monoBuffer.length,
-            monoBuffer.sampleRate,
-          );
-          const monoData = monoBuffer.getChannelData(0);
-          const leftData = stereoBuffer.getChannelData(0);
-          const rightData = stereoBuffer.getChannelData(1);
-          leftData.set(monoData);
-          rightData.set(monoData);
-          decoded = stereoBuffer;
-          logger.debug('[TTS] Converted mono buffer to stereo');
-        }
-        
-        const src = ac.createBufferSource();
-        src.buffer = decoded;
-        // track active buffer source so Stop button can stop it
-        try { activeBufferSrcRef.current = src; } catch (e) {}
-        // ensure destination exists
-        const dest = outDestinationRef.current || ac.createMediaStreamDestination();
-        outDestinationRef.current = dest;
-        // connect source through user-configured effects chain
-        try {
-          AudioFX.initTuna(ac);
-          const inputGain = ac.createGain();
-          src.connect(inputGain);
-          // connect chain (effects) between inputGain and dest
-          AudioFX.asyncConnectChain(inputGain as unknown as AudioNode, dest as unknown as AudioNode);
-        } catch (e) {
-          src.connect(dest);
-        }
-        // Do not connect to AudioContext destination to avoid duplicate playback.
-        // The buffer is routed to a MediaStreamDestination and played via the
-        // hidden audio element (`graphAudioRef`). Connecting to `ac.destination`
-        // would play the same audio twice.
-        src.start();
-        logger.debug('[TTS] Playing decoded buffer via AudioContext');
-        // When finished, unmute mic
-        src.onended = () => {
-          logger.debug('[TTS] AudioContext buffer ended, unmuting mic');
-          // clear active ref
-          try { if (activeBufferSrcRef.current === src) activeBufferSrcRef.current = null; } catch (e) {}
-          try { isPlayingTTSRef.current = false; } catch (e) {}
-          unmuteMic();
-        };
-        // Ensure graphAudioRef is attached and sink applied
-        ensureGraphRouting();
-        if (supportsSetSinkId && graphAudioRef.current && (graphAudioRef.current as any).setSinkId) {
-          try {
-            // @ts-ignore
-            await (graphAudioRef.current as any).setSinkId(selectedOutputId);
-            logger.debug('[TTS] setSinkId applied to graph audio element', selectedOutputId);
-          } catch (err) {
-            logger.warn('[TTS] graph setSinkId failed', err);
-          }
-        }
+        AudioFX.initTuna(ac);
+        const masterGain = audioMixerRef.current.getMasterGain();
+        // Disconnect any previous connection
+        try { masterGain.disconnect(); } catch (e) {}
+        // Connect through effects chain
+        AudioFX.asyncConnectChain(masterGain as unknown as AudioNode, dest as unknown as AudioNode);
+        logger.debug('[TTS] Effects chain connected to mixer output');
       } catch (e) {
-        logger.warn('[TTS] AudioContext decode/play failed, falling back to element playback', e);
-        const blob = new Blob([audioData], { type: 'audio/mpeg' });
-        const url = URL.createObjectURL(blob);
-        if (audioRef.current) {
-          audioRef.current.src = url;
-          audioRef.current.onended = () => {
-            URL.revokeObjectURL(url);
+        logger.warn('[TTS] Failed to connect effects chain, using direct connection', e);
+        const masterGain = audioMixerRef.current.getMasterGain();
+        try { masterGain.disconnect(); } catch (e) {}
+        masterGain.connect(dest);
+      }
+      
+      // Get all enabled voices
+      const enabledVoices = voices.filter(v => v.enabled && v.elevenLabsVoiceId);
+      if (enabledVoices.length === 0) {
+        logger.warn('[TTS] No enabled voices found, falling back to default');
+        enabledVoices.push(voices[0]); // Use first voice as fallback
+      }
+      
+      logger.debug('[TTS] Playing on', enabledVoices.length, 'voice(s) simultaneously');
+      
+      // Track active playback count
+      let activeCount = enabledVoices.length;
+      
+      // Make concurrent requests for all enabled voices
+      const voicePlaybackPromises = enabledVoices.map(async (voice) => {
+        try {
+          logger.debug('[TTS] Requesting audio for voice:', voice.name, voice.id);
+          
+          // Fetch audio for this voice
+          const res = await fetch('/api/tts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-password': pwHash },
+            body: JSON.stringify({ 
+              text, 
+              voiceId: voice.elevenLabsVoiceId 
+            }),
+          });
+          
+          if (!res.ok) {
+            logger.warn('[TTS] Voice', voice.name, 'request failed:', res.status);
+            return;
+          }
+          
+          const audioData = await res.arrayBuffer();
+          logger.debug('[TTS] Received audio for', voice.name, 'byteLength:', audioData.byteLength);
+          
+          // Decode audio
+          let decoded = await ac.decodeAudioData(audioData.slice(0));
+          
+          // Convert mono to stereo if needed
+          if (decoded.numberOfChannels === 1) {
+            const monoBuffer = decoded;
+            const stereoBuffer = ac.createBuffer(2, monoBuffer.length, monoBuffer.sampleRate);
+            const monoData = monoBuffer.getChannelData(0);
+            stereoBuffer.getChannelData(0).set(monoData);
+            stereoBuffer.getChannelData(1).set(monoData);
+            decoded = stereoBuffer;
+            logger.debug('[TTS]', voice.name, 'converted mono to stereo');
+          }
+          
+          // Get or create channel for this voice
+          const channel = audioMixerRef.current!.getOrCreateChannel(
+            voice.id,
+            voice.name,
+            voice.defaultVolume
+          );
+          
+          // Play directly on channel - effects are applied to the mixed output
+          audioMixerRef.current!.playOnChannel(voice.id, decoded, () => {
+            activeCount--;
+            logger.debug('[TTS]', voice.name, 'playback ended. Active:', activeCount);
+            if (activeCount === 0) {
+              logger.debug('[TTS] All voices finished, unmuting mic');
+              try { isPlayingTTSRef.current = false; } catch (e) {}
+              unmuteMic();
+            }
+          });
+          
+          logger.debug('[TTS]', voice.name, 'playback started on channel');
+          
+        } catch (err) {
+          logger.error('[TTS] Error playing voice', voice.name, err);
+          activeCount--;
+          if (activeCount === 0) {
             try { isPlayingTTSRef.current = false; } catch (e) {}
             unmuteMic();
-          };
-          try { await audioRef.current.play(); } catch (err) { logger.warn('Fallback element play failed', err); try { isPlayingTTSRef.current = false; } catch (e) {} unmuteMic(); }
-        } else {
-          const audio = new Audio(url);
-          audio.onended = () => { URL.revokeObjectURL(url); try { isPlayingTTSRef.current = false; } catch (e) {} unmuteMic(); };
-          try { await audio.play(); } catch (err) { logger.warn('Fallback Audio() play failed', err); try { isPlayingTTSRef.current = false; } catch (e) {} unmuteMic(); }
+          }
+        }
+      });
+      
+      // Wait for all voices to be initiated (but not necessarily finished playing)
+      await Promise.allSettled(voicePlaybackPromises);
+      
+      // Update voice channels state for UI
+      if (audioMixerRef.current) {
+        setVoiceChannels(audioMixerRef.current.getChannels());
+      }
+      
+      // Ensure graph routing and output device selection
+      ensureGraphRouting();
+      if (supportsSetSinkId && graphAudioRef.current && (graphAudioRef.current as any).setSinkId) {
+        try {
+          await (graphAudioRef.current as any).setSinkId(selectedOutputId);
+          logger.debug('[TTS] setSinkId applied to graph audio element', selectedOutputId);
+        } catch (err) {
+          logger.warn('[TTS] graph setSinkId failed', err);
         }
       }
+      
     } catch (err) {
-      logger.error('[TTS] playback error', err);
+      logger.error('[TTS] Multi-voice playback error', err);
+      try { isPlayingTTSRef.current = false; } catch (e) {}
       unmuteMic();
     }
   }
@@ -905,6 +957,31 @@ export default function AudioChatClean() {
                 {!supportsSetSinkId ? (
                   <div className="text-xs text-gray-500 mt-1">Note: Browser may not support per-tab output. Use system output or Chromium.</div>
                 ) : null}
+              </div>
+            </div>
+            {/* Voice Mixer Section */}
+            <div className="mt-3">
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium">Voice Mixer (2D Control)</label>
+              </div>
+              <div className="p-3 border rounded bg-gray-50">
+                <TriangleMixer
+                  voices={voices}
+                  onMixChange={(mix) => {
+                    // Update mixer volumes based on 2D control
+                    if (audioMixerRef.current) {
+                      Object.entries(mix).forEach(([voiceId, volume]) => {
+                        audioMixerRef.current!.setChannelVolume(voiceId, volume);
+                      });
+                      setVoiceChannels(audioMixerRef.current.getChannels());
+                    }
+                  }}
+                />
+                {voices.filter(v => v.enabled && v.elevenLabsVoiceId).length === 0 && (
+                  <div className="text-xs text-gray-500 text-center py-2 mt-2">
+                    Configure voices in src/app/voices.json
+                  </div>
+                )}
               </div>
             </div>
             <label className="block text-sm font-medium mb-1">API Password</label>

@@ -1,0 +1,25 @@
+{
+  "voices": [
+    {
+      "id": "voice1",
+      "name": "Chopin",
+      "elevenLabsVoiceId": "lsR52OxKqFgp7xGPOzAH",
+      "defaultVolume": 0.3,
+      "enabled": true
+    },
+    {
+      "id": "voice2",
+      "name": "Han",
+      "elevenLabsVoiceId": "SrApIuGLex4qh7iizlzV",
+      "defaultVolume": 0.3,
+      "enabled": true
+    },
+    {
+      "id": "voice3",
+      "name": "Rickman",
+      "elevenLabsVoiceId": "W7Ypc75k2rzNtANFrmrl",
+      "defaultVolume": 0.3,
+      "enabled": true
+    }
+  ]
+}
