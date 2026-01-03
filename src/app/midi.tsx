@@ -13,7 +13,7 @@ export function formatNumericValue(n: unknown): string {
 }
 
 // Available effect types
-export const EFFECT_TYPES = ['Delay', 'Phaser', 'Overdrive', 'Compressor', 'Filter', 'Tremolo', 'Bitcrusher', 'Chorus'] as const;
+export const EFFECT_TYPES = ['Delay', 'Phaser', 'Convolver', 'Compressor', 'Filter', 'Tremolo', 'Bitcrusher', 'Chorus'] as const;
 
 // Filter type options for Filter effect
 export const FILTER_TYPES = ['lowpass', 'highpass', 'bandpass', 'lowshelf', 'highshelf', 'peaking', 'notch', 'allpass'] as const;
@@ -26,17 +26,16 @@ export function useParamRanges(): Record<string, { min: number; max: number; ste
     delayTime: { min: 1, max: 3000, step: 23.6 },
     wetLevel: { min: 0, max: 2, step: 0.0157 },
     dryLevel: { min: 0, max: 2, step: 0.0157 },
-    cutoff: { min: 20, max: 10000, step: 78.6 },
+    cutoff: { min: 20, max: 5000, step: 40 },
     // Phaser params
     rate: { min: 0.01, max: 8, step: 0.063 },
     depth: { min: 0, max: 1, step: 0.0079 },
     stereoPhase: { min: 0, max: 180, step: 1.42 },
     baseModulationFrequency: { min: 200, max: 1500, step: 10.2 },
-    // Overdrive params
-    outputGain: { min: -42, max: 0, step: 0.33 },
-    drive: { min: 0, max: 1, step: 0.0079 },
-    curveAmount: { min: 0, max: 1, step: 0.0079 },
-    algorithmIndex: { min: 0, max: 5, step: 0.039 },
+    // Convolver params
+    highCut: { min: 20, max: 5000, step: 40 },
+    lowCut: { min: 20, max: 5000, step: 40 },
+    level: { min: 0, max: 1, step: 0.0079 },
     // Compressor params
     threshold: { min: -100, max: 0, step: 0.79 },
     makeupGain: { min: 0, max: 20, step: 0.157 },
@@ -46,7 +45,7 @@ export function useParamRanges(): Record<string, { min: number; max: number; ste
     knee: { min: 0, max: 40, step: 0.315 },
     automakeup: { min: 0, max: 1, step: 0.0079 },
     // Filter params
-    frequency: { min: 20, max: 10000, step: 80 },
+    frequency: { min: 20, max: 2500, step: 20 },
     Q: { min: 0.001, max: 100, step: 0.787 },
     gain: { min: -40, max: 40, step: 0.63 },
     // Tremolo params

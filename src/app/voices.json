@@ -19,7 +19,7 @@
       "name": "Rickman",
       "elevenLabsVoiceId": "W7Ypc75k2rzNtANFrmrl",
       "defaultVolume": 0.3,
-      "enabled": true
+      "enabled": false
     }
   ]
 }

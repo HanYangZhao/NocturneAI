@@ -1177,6 +1177,26 @@ export default function AudioChatClean() {
                           </div>
                         );
                       }
+                      // impulse select for Convolver effect
+                      if (fx.type === 'Convolver' && k === 'impulse') {
+                        const v = String(val || '');
+                        const impulses = [
+                          "CUSTOM_dream hall.WAV", "CUSTOM_gen concert.WAV", "CUSTOM_gen rhall.WAV", "CUSTOM_museum hall.WAV", "CUSTOM_nonlinear 1.WAV",
+                          "CUSTOM_pan hall.WAV", "CUSTOM_pump verb.WAV", "CUSTOM_tidal hall.WAV", "CUSTOM_utility verb.WAV", "INSTR_drum cave.WAV",
+                          "INSTR_for the toms.WAV", "INSTR_gated hall.WAV", "INSTR_guitar cave.WAV", "INSTR_horns hall.WAV", "INSTR_saxy hangar.WAV",
+                          "INSTR_short reverse.WAV", "INSTR_snare gate.WAV", "INSTR_synth hall.WAV", "VOC_choir hall.WAV", "VOC_deep verb.WAV",
+                          "VOC_good ol' verb.WAV", "VOC_rise 'n hall.WAV", "VOC_slap hall.WAV", "VOC_vocal concert.WAV", "VOC_vocal hall.WAV",
+                          "VOC_vocal hall2.WAV", "VOC_vocal magic.WAV", "VOC_wide vox.WAV"
+                        ];
+                        return (
+                          <div key={k} className="flex flex-col text-xs col-span-2">
+                            <label className="mb-1">{k}</label>
+                            <select className="p-1 text-xs border" value={v.replace('/LexiconHalls/', '')} onChange={(e) => { const nv = "/LexiconHalls/" + e.target.value; const nextEffects = effectsList.map(x=> x.id===fx.id?{...x, params: {...x.params, [k]: nv}}:x); setEffectsList(nextEffects); AudioFX.updateEffectParams(fx.id, { [k]: nv }); }}>
+                              {impulses.map(o => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                          </div>
+                        );
+                      }
                       // fallback: show value as text (read-only)
                       return (
                         <div key={k} className="flex flex-col text-xs">
