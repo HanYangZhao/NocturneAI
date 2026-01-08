@@ -273,8 +273,8 @@ export default function TriangleMixer({ voices, onMixChange }: TriangleMixerProp
       // Calculate angle for current progress (full circle = 2π)
       const angle = progress * 2 * Math.PI;
       
-      // Convert angle to position on circle edge (0.9 = 90% of radius for smooth motion)
-      const distanceFromCenter = 0.9;
+      // Convert angle to position on circle edge (1.0 = exactly on the edge)
+      const distanceFromCenter = 1.0;
       const x = 0.5 + Math.cos(angle) * distanceFromCenter * 0.5;
       const y = 0.5 + Math.sin(angle) * distanceFromCenter * 0.5;
       
