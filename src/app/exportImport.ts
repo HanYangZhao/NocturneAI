@@ -11,7 +11,9 @@ export interface ExportedConfig {
   }>;
   midiMappings?: Array<{
     assignedCC: number | null;
+    assignedNote?: number | null;
     targets: Array<{ effectId: string; paramKey: string }>;
+    actionTarget?: string | null;
   }>;
   midiChannel?: number;
 }
@@ -44,7 +46,12 @@ export function exportConfig(
  */
 export function importConfig(configJson: string): {
   effects: Array<{ id: string; type: string; params: any; bypass?: boolean }>;
-  midiMappings: Array<{ assignedCC: number | null; targets: Array<{ effectId: string; paramKey: string }> }>;
+  midiMappings: Array<{ 
+    assignedCC: number | null; 
+    assignedNote: number | null;
+    targets: Array<{ effectId: string; paramKey: string }>;
+    actionTarget: string | null;
+  }>;
   midiChannel: number;
 } {
   const config: ExportedConfig = JSON.parse(configJson);
@@ -60,7 +67,12 @@ export function importConfig(configJson: string): {
       params: e.params || {},
       bypass: e.bypass ?? false,
     })),
-    midiMappings: config.midiMappings || [],
+    midiMappings: (config.midiMappings || []).map((m) => ({
+      assignedCC: m.assignedCC ?? null,
+      assignedNote: m.assignedNote ?? null,
+      targets: m.targets || [],
+      actionTarget: m.actionTarget ?? null,
+    })),
     midiChannel: config.midiChannel ?? 1,
   };
 }

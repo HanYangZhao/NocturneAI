@@ -66,19 +66,32 @@ export function useParamRanges(): Record<string, { min: number; max: number; ste
   };
 }
 
+// Button action types that can be triggered by MIDI notes
+export type ButtonAction = 'stopAudio' | 'muteMic' | 'unmuteMic' | 'toggleMic';
+
 type MidiControllerProps = {
   paramLabels?: string[]; // optional labels for the 32 params
   onMidiCC?: (index: number, cc: number, channel: number, value: number) => void; // raw 0-127 value
+  onButtonAction?: (action: ButtonAction) => void; // callback for button actions
 };
 
 const STORAGE_KEY = "nocturne_midi_mappings_v1";
 
-export default function MidiController({ paramLabels = [], onMidiCC }: MidiControllerProps) {
-  const DEFAULT_COUNT = 36;
-  const initialLabels = Array.from({ length: DEFAULT_COUNT }, (_, i) => paramLabels[i] ?? `Param ${i + 1}`);
+export default function MidiController({ paramLabels = [], onMidiCC, onButtonAction }: MidiControllerProps) {
+  const DEFAULT_COUNT = 38; // Increased to include Stop Audio and Mute Mic
+  const initialLabels = Array.from({ length: DEFAULT_COUNT }, (_, i) => {
+    if (i === 36) return 'Stop Audio';
+    if (i === 37) return 'Toggle Mic Mute';
+    return paramLabels[i] ?? `Param ${i + 1}`;
+  });
 
-  // mapping slots: each slot can have assignedCC (number|null) and targets array [{ effectId, paramKey }]
-  type Slot = { assignedCC: number | null; targets: Array<{ effectId: string; paramKey: string }>; };
+  // mapping slots: each slot can have assignedCC/assignedNote (number|null) and targets array [{ effectId, paramKey }] or action targets
+  type Slot = { 
+    assignedCC: number | null; 
+    assignedNote: number | null; // MIDI note number (0-127)
+    targets: Array<{ effectId: string; paramKey: string }>;
+    actionTarget: ButtonAction | null; // For button actions
+  };
 
   const [mappings, setMappings] = useState<Array<Slot>>(() => {
     try {
@@ -86,16 +99,54 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed.mappings)) {
-          const loaded = parsed.mappings.slice(0, DEFAULT_COUNT).map((v: any) => ({ assignedCC: typeof v.assignedCC === 'number' ? v.assignedCC : null, targets: Array.isArray(v.targets) ? v.targets : [] }));
+          const loaded = parsed.mappings.slice(0, DEFAULT_COUNT).map((v: any, i: number) => {
+            // Always set action targets for slots 37 and 38 (indices 36 and 37)
+            if (i === 36) {
+              return {
+                assignedCC: null,
+                assignedNote: typeof v.assignedNote === 'number' ? v.assignedNote : 60,
+                targets: [],
+                actionTarget: 'stopAudio' as ButtonAction
+              };
+            }
+            if (i === 37) {
+              return {
+                assignedCC: null,
+                assignedNote: typeof v.assignedNote === 'number' ? v.assignedNote : 61,
+                targets: [],
+                actionTarget: 'toggleMic' as ButtonAction
+              };
+            }
+            // For other slots, load normally
+            return {
+              assignedCC: typeof v.assignedCC === 'number' ? v.assignedCC : null, 
+              assignedNote: null,
+              targets: Array.isArray(v.targets) ? v.targets : [],
+              actionTarget: null
+            };
+          });
           // Pad to DEFAULT_COUNT if needed
           while (loaded.length < DEFAULT_COUNT) {
-            loaded.push({ assignedCC: null, targets: [] });
+            const i = loaded.length;
+            if (i === 36) {
+              loaded.push({ assignedCC: null, assignedNote: 60, targets: [], actionTarget: 'stopAudio' as ButtonAction });
+            } else if (i === 37) {
+              loaded.push({ assignedCC: null, assignedNote: 61, targets: [], actionTarget: 'toggleMic' as ButtonAction });
+            } else {
+              loaded.push({ assignedCC: null, assignedNote: null, targets: [], actionTarget: null });
+            }
           }
           return loaded;
         }
       }
     } catch (e) {}
-    return Array.from({ length: DEFAULT_COUNT }, () => ({ assignedCC: null as number | null, targets: [] as Array<{ effectId: string; paramKey: string }> }));
+    const defaults = Array.from({ length: DEFAULT_COUNT }, (_, i) => {
+      // Set default action targets for slots 37 and 38
+      if (i === 36) return { assignedCC: null, assignedNote: 60, targets: [], actionTarget: 'stopAudio' as ButtonAction };
+      if (i === 37) return { assignedCC: null, assignedNote: 61, targets: [], actionTarget: 'toggleMic' as ButtonAction };
+      return { assignedCC: null, assignedNote: null, targets: [], actionTarget: null };
+    });
+    return defaults;
   });
 
   const [channel, setChannel] = useState<number>(() => {
@@ -115,6 +166,10 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
   const [selectedInputId, setSelectedInputId] = useState<string | null>(null); // null = all
   const listeningRef = useRef<number | null>(null); // index we're learning
   const [flashSlots, setFlashSlots] = useState<Record<number, boolean>>({});
+  
+  // Use refs to avoid stale closures in MIDI message handler
+  const mappingsRef = useRef(mappings);
+  const onButtonActionRef = useRef(onButtonAction);
 
   // Param ranges - used to map 0..127 to param ranges
   const paramRanges = useParamRanges();
@@ -124,7 +179,13 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ mappings, channel }));
     } catch (e) {}
+    // Update ref for MIDI handler
+    mappingsRef.current = mappings;
   }, [mappings, channel]);
+  
+  useEffect(() => {
+    onButtonActionRef.current = onButtonAction;
+  }, [onButtonAction]);
 
   useEffect(() => {
     let mounted = true;
@@ -158,8 +219,8 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
 
   // On first run, if no mappings assigned, populate sensible defaults from AudioFX effects
   useEffect(() => {
-    // if any assigned, skip
-    if (mappings.some((s) => s.assignedCC !== null || (s.targets && s.targets.length > 0))) return;
+    // if any assigned (excluding action slots 36-37), skip
+    if (mappings.slice(0, 36).some((s) => s.assignedCC !== null || (s.targets && s.targets.length > 0))) return;
     const effects = AudioFX.getEffects();
     if (!effects || effects.length === 0) return;
     // build list of candidate targets: [{effectId,paramKey}]
@@ -172,20 +233,20 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
     }
     if (candidates.length === 0) return;
     const next = mappings.slice();
-    for (let i = 0; i < next.length && i < candidates.length; i++) {
+    for (let i = 0; i < 36 && i < candidates.length; i++) { // Only assign first 36 slots
       // assign a default CC number from 1-36
-      next[i] = { assignedCC: i + 1, targets: [candidates[i]] };
+      next[i] = { assignedCC: i + 1, assignedNote: null, targets: [candidates[i]], actionTarget: null };
     }
     
     // Special mappings: Params 34-36 (CC 34-36) for Overdrive effect
     const overdriveEffect = effects.find((e: any) => e.type === 'Overdrive');
     if (overdriveEffect) {
       // Param 34 (index 33) -> CC 34 -> outputGain
-      next[33] = { assignedCC: 34, targets: [{ effectId: overdriveEffect.id, paramKey: 'outputGain' }] };
+      next[33] = { assignedCC: 34, assignedNote: null, targets: [{ effectId: overdriveEffect.id, paramKey: 'outputGain' }], actionTarget: null };
       // Param 35 (index 34) -> CC 35 -> drive
-      next[34] = { assignedCC: 35, targets: [{ effectId: overdriveEffect.id, paramKey: 'drive' }] };
+      next[34] = { assignedCC: 35, assignedNote: null, targets: [{ effectId: overdriveEffect.id, paramKey: 'drive' }], actionTarget: null };
       // Param 36 (index 35) -> CC 36 -> curveAmount
-      next[35] = { assignedCC: 36, targets: [{ effectId: overdriveEffect.id, paramKey: 'curveAmount' }] };
+      next[35] = { assignedCC: 36, assignedNote: null, targets: [{ effectId: overdriveEffect.id, paramKey: 'curveAmount' }], actionTarget: null };
     }
     
     setMappings(next);
@@ -196,14 +257,16 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
     const [status, data1, data2] = ev.data;
     const msgType = status & 0xf0;
     const ch = (status & 0x0f) + 1; // 1-16
-      if (msgType === 0xB0) {
+    
+    // Handle MIDI CC messages (0xB0)
+    if (msgType === 0xB0) {
       const cc = data1;
       const val = data2; // 0-127
       // If we're learning, set mapping
       if (listeningRef.current !== null) {
         const idx = listeningRef.current as number;
-        const next = mappings.slice();
-        next[idx] = { ...next[idx], assignedCC: cc };
+        const next = mappingsRef.current.slice();
+        next[idx] = { ...next[idx], assignedCC: cc, assignedNote: null };
         setMappings(next);
         listeningRef.current = null;
         return;
@@ -211,7 +274,7 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
       // respect global channel (1-16) or 0 for any
       if (channel !== 0 && ch !== channel) return;
       // find mappings assigned to this CC
-      mappings.forEach((slot, idx) => {
+      mappingsRef.current.forEach((slot, idx) => {
         if (slot.assignedCC === cc) {
           // visual flash
           setFlashSlots((s) => ({ ...s, [idx]: true }));
@@ -243,6 +306,57 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
         }
       });
     }
+    
+    // Handle MIDI Note-On messages (0x90)
+    if (msgType === 0x90) {
+      const note = data1;
+      const velocity = data2; // 0-127
+      logger.info('[MIDI] Note-On received:', note, 'velocity:', velocity, 'channel:', ch);
+      // Note-on with velocity 0 is often used as note-off, so ignore
+      if (velocity === 0) return;
+      
+      // If we're learning, set note mapping
+      if (listeningRef.current !== null) {
+        const idx = listeningRef.current as number;
+        const next = mappingsRef.current.slice();
+        next[idx] = { ...next[idx], assignedCC: null, assignedNote: note };
+        setMappings(next);
+        listeningRef.current = null;
+        logger.debug('[MIDI] Learned note', note, 'for slot', idx);
+        return;
+      }
+      
+      // respect global channel (1-16) or 0 for any
+      if (channel !== 0 && ch !== channel) {
+        logger.debug('[MIDI] Note ignored - channel mismatch. Expected:', channel, 'Got:', ch);
+        return;
+      }
+      
+      logger.debug('[MIDI] Checking', mappingsRef.current.length, 'mappings for note', note);
+      // find mappings assigned to this note
+      mappingsRef.current.forEach((slot, idx) => {
+        logger.debug('[MIDI] Slot', idx, 'assignedNote:', slot.assignedNote, 'actionTarget:', slot.actionTarget);
+        if (slot.assignedNote === note) {
+          logger.debug('[MIDI] Match found! Slot', idx, 'has note', note);
+          // visual flash
+          setFlashSlots((s) => ({ ...s, [idx]: true }));
+          setTimeout(() => setFlashSlots((s) => ({ ...s, [idx]: false })), 220);
+          
+          // If this slot has an action target, trigger it
+          const callback = onButtonActionRef.current;
+          logger.debug('[MIDI] Callback exists?', !!callback, 'actionTarget:', slot.actionTarget);
+          if (slot.actionTarget && callback) {
+            try {
+              logger.debug('[MIDI] Calling callback for action:', slot.actionTarget);
+              callback(slot.actionTarget);
+              logger.debug('[MIDI] Triggered action:', slot.actionTarget, 'from note', note);
+            } catch (e) {
+              logger.warn('[MIDI] Failed to trigger action', slot.actionTarget, e);
+            }
+          }
+        }
+      });
+    }
   }
 
   function startLearn(idx: number) {
@@ -251,7 +365,9 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
 
   function clearMapping(idx: number) {
     const next = mappings.slice();
-    next[idx] = { assignedCC: null, targets: [] };
+    // Preserve actionTarget if it exists (for predefined action slots)
+    const actionTarget = next[idx].actionTarget;
+    next[idx] = { assignedCC: null, assignedNote: null, targets: [], actionTarget };
     setMappings(next);
   }
 
@@ -317,7 +433,7 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
   return (
     <div className="bg-white p-3 rounded shadow text-sm">
       <div className="flex items-center justify-between mb-2">
-        <strong>MIDI CC Mapper</strong>
+        <strong>MIDI Mapper</strong>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <label className="text-xs">Channel</label>
@@ -348,38 +464,61 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
                   <div className="w-8 text-sm font-medium">{i + 1}</div>
                   <div className="flex-1">
                     <div className="text-sm font-semibold">{initialLabels[i]}</div>
-                    <div className="mt-2 flex items-center gap-2">
-                      <label className="text-xs text-gray-600">CC</label>
-                      <input type="number" min={0} max={127} value={slot.assignedCC ?? ""} onChange={(e) => {
-                        const v = e.target.value === "" ? null : Math.max(0, Math.min(127, Number(e.target.value)));
-                        const next = mappings.slice(); next[i] = { ...next[i], assignedCC: v }; setMappings(next);
-                      }} className="w-20 p-1 border text-xs" />
-                      <button onClick={() => startLearn(i)} className="px-2 py-1 border rounded text-xs">{listeningRef.current === i ? 'Listening…' : 'Learn'}</button>
-                      <button onClick={() => clearMapping(i)} className="px-2 py-1 border rounded text-xs text-red-600">Clear</button>
+                    <div className="mt-2 space-y-2">
+                      {/* Show CC field for non-action slots, Note field for action slots */}
+                      {slot.actionTarget ? (
+                        <div className="flex items-center gap-2">
+                          <label className="text-xs text-gray-600 w-10">Note</label>
+                          <input type="number" min={0} max={127} value={slot.assignedNote ?? ""} onChange={(e) => {
+                            const v = e.target.value === "" ? null : Math.max(0, Math.min(127, Number(e.target.value)));
+                            const next = mappings.slice(); next[i] = { ...next[i], assignedCC: null, assignedNote: v }; setMappings(next);
+                          }} className="w-20 p-1 border text-xs" />
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <label className="text-xs text-gray-600 w-10">CC</label>
+                          <input type="number" min={0} max={127} value={slot.assignedCC ?? ""} onChange={(e) => {
+                            const v = e.target.value === "" ? null : Math.max(0, Math.min(127, Number(e.target.value)));
+                            const next = mappings.slice(); next[i] = { ...next[i], assignedCC: v, assignedNote: null }; setMappings(next);
+                          }} className="w-20 p-1 border text-xs" />
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => startLearn(i)} className="px-2 py-1 border rounded text-xs">{listeningRef.current === i ? 'Listening…' : 'Learn'}</button>
+                        <button onClick={() => clearMapping(i)} className="px-2 py-1 border rounded text-xs text-red-600">Clear</button>
+                      </div>
                     </div>
                     <div className="mt-3">
-                      <div className="flex items-center gap-2">
-                        <div className="text-xs font-medium">Targets</div>
-                        <button onClick={() => addTarget(i)} className="px-2 py-0.5 border rounded text-xs">Add</button>
-                      </div>
-                      <div className="mt-2 space-y-2">
-                        {(slot.targets || []).map((t, ti) => (
-                          <div key={ti} className="flex items-center gap-2">
-                            <select value={t.effectId} onChange={(e) => updateTarget(i, ti, { effectId: e.target.value, paramKey: '' })} className="p-1 text-xs border">
-                              {AudioFX.getEffects().map((eff: any) => <option key={eff.id} value={eff.id}>{eff.type}</option>)}
-                            </select>
-                            <select value={t.paramKey} onChange={(e) => updateTarget(i, ti, { paramKey: e.target.value })} className="p-1 text-xs border">
-                              {(() => {
-                                const eff = AudioFX.getEffects().find((e: any) => e.id === t.effectId);
-                                if (!eff) return [<option key="-" value="">-</option>];
-                                const keys = Object.keys(eff.params || {}).filter(k => typeof (eff.params || {})[k] === 'number');
-                                return keys.map((k) => <option key={k} value={k}>{k}</option>);
-                              })()}
-                            </select>
-                            <button onClick={() => removeTarget(i, ti)} className="px-2 py-0.5 border rounded text-xs text-red-600">Remove</button>
+                      {slot.actionTarget ? (
+                        <div className="p-2 bg-blue-50 rounded border border-blue-200">
+                          <div className="text-xs font-medium text-blue-800">Action: {slot.actionTarget}</div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <div className="text-xs font-medium">Targets</div>
+                            <button onClick={() => addTarget(i)} className="px-2 py-0.5 border rounded text-xs">Add</button>
                           </div>
-                        ))}
-                      </div>
+                          <div className="mt-2 space-y-2">
+                            {(slot.targets || []).map((t, ti) => (
+                              <div key={ti} className="flex items-center gap-2">
+                                <select value={t.effectId} onChange={(e) => updateTarget(i, ti, { effectId: e.target.value, paramKey: '' })} className="p-1 text-xs border">
+                                  {AudioFX.getEffects().map((eff: any) => <option key={eff.id} value={eff.id}>{eff.type}</option>)}
+                                </select>
+                                <select value={t.paramKey} onChange={(e) => updateTarget(i, ti, { paramKey: e.target.value })} className="p-1 text-xs border">
+                                  {(() => {
+                                    const eff = AudioFX.getEffects().find((e: any) => e.id === t.effectId);
+                                    if (!eff) return [<option key="-" value="">-</option>];
+                                    const keys = Object.keys(eff.params || {}).filter(k => typeof (eff.params || {})[k] === 'number');
+                                    return keys.map((k) => <option key={k} value={k}>{k}</option>);
+                                  })()}
+                                </select>
+                                <button onClick={() => removeTarget(i, ti)} className="px-2 py-0.5 border rounded text-xs text-red-600">Remove</button>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -388,7 +527,7 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
           })}
         </div>
       </div>
-      <div className="mt-2 text-xs text-gray-600">Tip: click Learn, then move a controller to assign its CC to that parameter. Channel can be set to Any or 1–16.</div>
+      <div className="mt-2 text-xs text-gray-600">Tip: click Learn, then move a CC controller (for params 1-36) or press a MIDI note (for button actions 37-38). Channel can be set to Any or 1–16.</div>
       <div className="mt-3 flex gap-2 flex-wrap">
         <button
           onClick={async () => {
@@ -416,7 +555,11 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
             try {
               const json = await ExportImport.loadConfigFromClipboard();
               const config = ExportImport.importConfig(json);
-              setMappings(config.midiMappings);
+              const mappingsWithActions = config.midiMappings.map(m => ({
+                ...m,
+                actionTarget: m.actionTarget as ButtonAction | null
+              }));
+              setMappings(mappingsWithActions);
               setChannel(config.midiChannel);
               alert('MIDI mappings loaded from clipboard!');
             } catch (e) {
@@ -445,7 +588,11 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
             try {
               const json = await ExportImport.loadConfigFromFile();
               const config = ExportImport.importConfig(json);
-              setMappings(config.midiMappings);
+              const mappingsWithActions = config.midiMappings.map(m => ({
+                ...m,
+                actionTarget: m.actionTarget as ButtonAction | null
+              }));
+              setMappings(mappingsWithActions);
               setChannel(config.midiChannel);
               alert('MIDI mappings loaded from file!');
             } catch (e) {

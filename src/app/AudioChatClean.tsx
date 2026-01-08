@@ -52,6 +52,7 @@ export default function AudioChatClean() {
         unmuteMic();
       }
     const [micMuted, setMicMuted] = useState(false);
+    const micMutedRef = useRef(false);
   // --- TTS and mic helpers (must be inside component for refs) ---
   const audioRef = useRef<HTMLAudioElement | null>(null);
   // Active AudioBufferSourceNode when using AudioContext playback
@@ -77,6 +78,11 @@ export default function AudioChatClean() {
   const audioMixerRef = useRef<AudioMixer | null>(null);
   const [voiceChannels, setVoiceChannels] = useState<VoiceChannel[]>([]);
   const [voices] = useState(voicesConfig.voices);
+
+  // Keep micMutedRef in sync with micMuted state
+  useEffect(() => {
+    micMutedRef.current = micMuted;
+  }, [micMuted]);
 
   function computeChainFromConnections(conns: Array<{ from: string; to: string }>) {
     // build successor map (keep first successor if multiple)
@@ -1055,7 +1061,7 @@ export default function AudioChatClean() {
                   onClick={() => setShowMidiController(!showMidiController)}
                   className="text-xs px-2 py-1 border rounded hover:bg-blue-50"
                 >
-                  MIDI CC
+                  MIDI Mapper
                 </button>
                 {/** Bypass all / Enable all toggle */}
                 <button
@@ -1221,7 +1227,7 @@ export default function AudioChatClean() {
               <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                 <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-auto">
                   <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white">
-                    <strong className="text-lg">MIDI CC Mapper</strong>
+                    <strong className="text-lg">MIDI Mapper (CC & Notes)</strong>
                     <button
                       onClick={() => setShowMidiController(false)}
                       className="text-2xl font-bold text-gray-500 hover:text-gray-700"
@@ -1230,7 +1236,28 @@ export default function AudioChatClean() {
                     </button>
                   </div>
                   <div className="p-4">
-                    <MidiController />
+                    <MidiController 
+                      onButtonAction={(action) => {
+                        try {
+                          if (action === 'stopAudio') {
+                            stopTTSPlayback();
+                          } else if (action === 'muteMic') {
+                            muteMic();
+                          } else if (action === 'unmuteMic') {
+                            unmuteMic();
+                          } else if (action === 'toggleMic') {
+                            // Use ref to get current state, avoiding stale closure
+                            if (micMutedRef.current) {
+                              unmuteMic();
+                            } else {
+                              muteMic();
+                            }
+                          }
+                        } catch (e) {
+                          logger.warn('[MIDI] Failed to execute button action', action, e);
+                        }
+                      }}
+                    />
                   </div>
                 </div>
               </div>
