@@ -14,6 +14,7 @@
   import { AudioMixer, type VoiceChannel } from "./audioMixer";
   import voicesConfig from "./voices.json";
   import TriangleMixer from "./TriangleMixer";
+  import PanControl, { DEFAULT_PAN_PRESETS, type PanPreset } from "./PanControl";
 
 export default function AudioChatClean() {
       // Stop TTS audio playback
@@ -78,6 +79,32 @@ export default function AudioChatClean() {
   const audioMixerRef = useRef<AudioMixer | null>(null);
   const [voiceChannels, setVoiceChannels] = useState<VoiceChannel[]>([]);
   const [voices] = useState(voicesConfig.voices);
+
+  // Pan presets
+  const [panPresets, setPanPresets] = useState<PanPreset[]>(() => {
+    try {
+      const stored = localStorage.getItem('nocturne_pan_presets');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load pan presets from localStorage', e);
+    }
+    return DEFAULT_PAN_PRESETS;
+  });
+  const [currentPanPresetId, setCurrentPanPresetId] = useState<string>("preset1");
+
+  // Persist pan presets to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('nocturne_pan_presets', JSON.stringify(panPresets));
+    } catch (e) {
+      console.warn('Failed to save pan presets to localStorage', e);
+    }
+  }, [panPresets]);
 
   // Keep micMutedRef in sync with micMuted state
   useEffect(() => {
@@ -757,6 +784,26 @@ export default function AudioChatClean() {
     if (!outDestinationRef.current) {
       outDestinationRef.current = ac.createMediaStreamDestination();
     }
+    
+    // Initialize audio mixer early so pan controls work before any audio plays
+    if (!audioMixerRef.current) {
+      audioMixerRef.current = new AudioMixer(ac, outDestinationRef.current);
+      logger.debug('[AudioMixer] Initialized early for pan controls');
+      
+      // Connect mixer master output through effects chain to destination
+      try {
+        AudioFX.initTuna(ac);
+        const masterGain = audioMixerRef.current.getMasterGain();
+        AudioFX.asyncConnectChain(masterGain as unknown as AudioNode, outDestinationRef.current as unknown as AudioNode);
+        logger.debug('[AudioMixer] Effects chain connected to mixer output');
+      } catch (e) {
+        logger.warn('[AudioMixer] Failed to connect effects chain, using direct connection', e);
+        const masterGain = audioMixerRef.current.getMasterGain();
+        try { masterGain.disconnect(); } catch (e) {}
+        masterGain.connect(outDestinationRef.current);
+      }
+    }
+    
     // Attach destination stream to hidden audio element for sink switching
     if (!graphAudioRef.current) {
       const a = document.createElement('audio');
@@ -771,12 +818,6 @@ export default function AudioChatClean() {
         graphAudioRef.current.srcObject = outDestinationRef.current.stream;
       } catch (e) {
         logger.warn('Failed to set srcObject on graph audio element', e);
-      }
-      // initialize Tuna
-      try {
-        AudioFX.initTuna(ac);
-      } catch (e) {
-        logger.debug('Tuna init failed or not available', e);
       }
 
       // apply sink if supported
@@ -893,6 +934,13 @@ export default function AudioChatClean() {
   }
 
   useEffect(() => {
+    // Initialize audio context and mixer on mount so pan controls work immediately
+    try {
+      ensureGraphRouting();
+    } catch (e) {
+      logger.warn('Failed to initialize audio routing on mount', e);
+    }
+    
     return () => {
       stopRealtime();
     };
@@ -988,6 +1036,29 @@ export default function AudioChatClean() {
                     Configure voices in src/app/voices.json
                   </div>
                 )}
+              </div>
+            </div>
+            {/* Voice Panning Section */}
+            <div className="mt-3">
+              <div className="p-3 border rounded bg-gray-50">
+                <PanControl
+                  voices={voices}
+                  presets={panPresets}
+                  currentPresetId={currentPanPresetId}
+                  onPanChange={(voiceId, pan) => {
+                    // Update mixer panning
+                    if (audioMixerRef.current) {
+                      audioMixerRef.current.setChannelPan(voiceId, pan);
+                      setVoiceChannels(audioMixerRef.current.getChannels());
+                    }
+                  }}
+                  onPresetChange={(preset) => {
+                    setCurrentPanPresetId(preset.id);
+                  }}
+                  onPresetsUpdate={(updatedPresets) => {
+                    setPanPresets(updatedPresets);
+                  }}
+                />
               </div>
             </div>
             <label className="block text-sm font-medium mb-1">API Password</label>
@@ -1094,7 +1165,7 @@ export default function AudioChatClean() {
                           midiChannel = parsed.channel;
                         }
                       } catch (e) {}
-                      const config = ExportImport.exportConfig(effectsList, midiMappings, midiChannel);
+                      const config = ExportImport.exportConfig(effectsList, midiMappings, midiChannel, panPresets, currentPanPresetId);
                       ExportImport.downloadConfigAsFile(config, `nocturne-effects-${new Date().toISOString().split('T')[0]}.json`);
                     } catch (e) {
                       alert('Failed to export: ' + (e instanceof Error ? e.message : String(e)));
@@ -1122,6 +1193,21 @@ export default function AudioChatClean() {
                             AudioFX.updateEffectParams(f.id, { bypass: f.bypass });
                           }
                         } catch (e) {}
+                      }
+                      // Restore pan preset if present
+                      if (config.panPresets && config.panPresets.length > 0) {
+                        setPanPresets(config.panPresets);
+                      }
+                      if (config.currentPanPresetId) {
+                        setCurrentPanPresetId(config.currentPanPresetId);
+                        const presetToApply = (config.panPresets && config.panPresets.length > 0) 
+                          ? config.panPresets.find(p => p.id === config.currentPanPresetId)
+                          : panPresets.find(p => p.id === config.currentPanPresetId);
+                        if (presetToApply && audioMixerRef.current) {
+                          Object.entries(presetToApply.pans).forEach(([voiceId, pan]) => {
+                            audioMixerRef.current!.setChannelPan(voiceId, pan);
+                          });
+                        }
                       }
                       // Also restore MIDI mappings if present
                       if (config.midiMappings && config.midiMappings.length > 0) {
@@ -1237,6 +1323,30 @@ export default function AudioChatClean() {
                   </div>
                   <div className="p-4">
                     <MidiController 
+                      availablePanPresets={panPresets.map(p => ({ id: p.id, name: p.name }))}
+                      onPanPreset={(presetId) => {
+                        logger.info('[MIDI] onPanPreset called with presetId:', presetId);
+                        try {
+                          const preset = panPresets.find(p => p.id === presetId);
+                          logger.info('[MIDI] Found preset?', !!preset, 'audioMixer exists?', !!audioMixerRef.current);
+                          if (preset && audioMixerRef.current) {
+                            logger.info('[MIDI] Setting preset ID to:', presetId);
+                            setCurrentPanPresetId(presetId);
+                            // Apply each voice's pan value through the mixer
+                            voices.forEach(v => {
+                              const pan = preset.pans[v.id] ?? 0;
+                              logger.info('[MIDI] Setting pan for', v.id, ':', pan);
+                              audioMixerRef.current!.setChannelPan(v.id, pan);
+                            });
+                            setVoiceChannels(audioMixerRef.current.getChannels());
+                            logger.info('[MIDI] Applied pan preset:', preset.name, preset.pans);
+                          } else {
+                            logger.warn('[MIDI] Cannot apply preset - preset:', !!preset, 'mixer:', !!audioMixerRef.current);
+                          }
+                        } catch (e) {
+                          logger.error('[MIDI] Failed to apply pan preset', presetId, e);
+                        }
+                      }}
                       onButtonAction={(action) => {
                         try {
                           if (action === 'stopAudio') {

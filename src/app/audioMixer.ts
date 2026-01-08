@@ -7,7 +7,9 @@ export interface VoiceChannel {
   id: string;
   name: string;
   gainNode: GainNode;
+  pannerNode: StereoPannerNode;
   volume: number;
+  pan: number; // -1 (left) to +1 (right)
   muted: boolean;
   activeSource: AudioBufferSourceNode | null;
 }
@@ -39,13 +41,21 @@ export class AudioMixer {
 
     const gainNode = this.audioContext.createGain();
     gainNode.gain.value = defaultVolume;
-    gainNode.connect(this.masterGain);
+    
+    const pannerNode = this.audioContext.createStereoPanner();
+    pannerNode.pan.value = 0; // Center by default
+    
+    // Connect: gainNode -> pannerNode -> masterGain
+    gainNode.connect(pannerNode);
+    pannerNode.connect(this.masterGain);
 
     const channel: VoiceChannel = {
       id,
       name,
       gainNode,
+      pannerNode,
       volume: defaultVolume,
+      pan: 0,
       muted: false,
       activeSource: null,
     };
@@ -151,6 +161,17 @@ export class AudioMixer {
   }
 
   /**
+   * Set pan for a specific channel (-1 = left, 0 = center, +1 = right)
+   */
+  setChannelPan(channelId: string, pan: number) {
+    const channel = this.channels.get(channelId);
+    if (channel) {
+      channel.pan = Math.max(-1, Math.min(1, pan));
+      channel.pannerNode.pan.value = channel.pan;
+    }
+  }
+
+  /**
    * Get the master gain node for connecting effects chain
    */
   getMasterGain(): GainNode {
@@ -178,6 +199,11 @@ export class AudioMixer {
     const channel = this.channels.get(channelId);
     if (channel) {
       this.stopChannel(channelId);
+      try {
+        channel.pannerNode.disconnect();
+      } catch (e) {
+        // ignore
+      }
       try {
         channel.gainNode.disconnect();
       } catch (e) {

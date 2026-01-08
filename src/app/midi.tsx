@@ -73,24 +73,28 @@ type MidiControllerProps = {
   paramLabels?: string[]; // optional labels for the 32 params
   onMidiCC?: (index: number, cc: number, channel: number, value: number) => void; // raw 0-127 value
   onButtonAction?: (action: ButtonAction) => void; // callback for button actions
+  onPanPreset?: (presetId: string) => void; // callback for pan preset selection
+  availablePanPresets?: Array<{ id: string; name: string }>; // available pan presets
 };
 
 const STORAGE_KEY = "nocturne_midi_mappings_v1";
 
-export default function MidiController({ paramLabels = [], onMidiCC, onButtonAction }: MidiControllerProps) {
-  const DEFAULT_COUNT = 38; // Increased to include Stop Audio and Mute Mic
+export default function MidiController({ paramLabels = [], onMidiCC, onButtonAction, onPanPreset, availablePanPresets = [] }: MidiControllerProps) {
+  const DEFAULT_COUNT = 48; // 36 params + 10 pan presets + 2 actions
   const initialLabels = Array.from({ length: DEFAULT_COUNT }, (_, i) => {
-    if (i === 36) return 'Stop Audio';
-    if (i === 37) return 'Toggle Mic Mute';
+    if (i >= 36 && i <= 45) return `Pan Preset ${i - 35}`; // Slots 37-46
+    if (i === 46) return 'Stop Audio';
+    if (i === 47) return 'Toggle Mic Mute';
     return paramLabels[i] ?? `Param ${i + 1}`;
   });
 
-  // mapping slots: each slot can have assignedCC/assignedNote (number|null) and targets array [{ effectId, paramKey }] or action targets
+  // mapping slots: each slot can have assignedCC/assignedNote (number|null) and targets array [{ effectId, paramKey }] or action targets or pan preset
   type Slot = { 
     assignedCC: number | null; 
     assignedNote: number | null; // MIDI note number (0-127)
     targets: Array<{ effectId: string; paramKey: string }>;
     actionTarget: ButtonAction | null; // For button actions
+    panPresetId: string | null; // For pan preset selection
   };
 
   const [mappings, setMappings] = useState<Array<Slot>>(() => {
@@ -100,40 +104,65 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed.mappings)) {
           const loaded = parsed.mappings.slice(0, DEFAULT_COUNT).map((v: any, i: number) => {
-            // Always set action targets for slots 37 and 38 (indices 36 and 37)
-            if (i === 36) {
+            // Slots 37-46 (indices 36-45) are pan presets
+            if (i >= 36 && i <= 45) {
+              const presetIndex = i - 36;
               return {
                 assignedCC: null,
-                assignedNote: typeof v.assignedNote === 'number' ? v.assignedNote : 60,
+                assignedNote: typeof v.assignedNote === 'number' ? v.assignedNote : 60 + presetIndex,
                 targets: [],
-                actionTarget: 'stopAudio' as ButtonAction
+                actionTarget: null,
+                panPresetId: typeof v.panPresetId === 'string' ? v.panPresetId : (availablePanPresets[presetIndex]?.id || `preset${presetIndex + 1}`)
               };
             }
-            if (i === 37) {
+            // Slot 47 (index 46) is Stop Audio
+            if (i === 46) {
               return {
                 assignedCC: null,
-                assignedNote: typeof v.assignedNote === 'number' ? v.assignedNote : 61,
+                assignedNote: typeof v.assignedNote === 'number' ? v.assignedNote : 70,
                 targets: [],
-                actionTarget: 'toggleMic' as ButtonAction
+                actionTarget: 'stopAudio' as ButtonAction,
+                panPresetId: null
               };
             }
-            // For other slots, load normally
+            // Slot 48 (index 47) is Toggle Mic
+            if (i === 47) {
+              return {
+                assignedCC: null,
+                assignedNote: typeof v.assignedNote === 'number' ? v.assignedNote : 71,
+                targets: [],
+                actionTarget: 'toggleMic' as ButtonAction,
+                panPresetId: null
+              };
+            }
+            // For other slots (1-36), load normally
             return {
               assignedCC: typeof v.assignedCC === 'number' ? v.assignedCC : null, 
-              assignedNote: null,
+              assignedNote: typeof v.assignedNote === 'number' ? v.assignedNote : null,
               targets: Array.isArray(v.targets) ? v.targets : [],
-              actionTarget: null
+              actionTarget: null,
+              panPresetId: null
             };
           });
           // Pad to DEFAULT_COUNT if needed
           while (loaded.length < DEFAULT_COUNT) {
             const i = loaded.length;
-            if (i === 36) {
-              loaded.push({ assignedCC: null, assignedNote: 60, targets: [], actionTarget: 'stopAudio' as ButtonAction });
-            } else if (i === 37) {
-              loaded.push({ assignedCC: null, assignedNote: 61, targets: [], actionTarget: 'toggleMic' as ButtonAction });
+            // Slots 37-46 (indices 36-45) are pan presets
+            if (i >= 36 && i <= 45) {
+              const presetIndex = i - 36;
+              loaded.push({ 
+                assignedCC: null, 
+                assignedNote: 60 + presetIndex, 
+                targets: [], 
+                actionTarget: null, 
+                panPresetId: availablePanPresets[presetIndex]?.id || `preset${presetIndex + 1}` 
+              });
+            } else if (i === 46) {
+              loaded.push({ assignedCC: null, assignedNote: 70, targets: [], actionTarget: 'stopAudio' as ButtonAction, panPresetId: null });
+            } else if (i === 47) {
+              loaded.push({ assignedCC: null, assignedNote: 71, targets: [], actionTarget: 'toggleMic' as ButtonAction, panPresetId: null });
             } else {
-              loaded.push({ assignedCC: null, assignedNote: null, targets: [], actionTarget: null });
+              loaded.push({ assignedCC: null, assignedNote: null, targets: [], actionTarget: null, panPresetId: null });
             }
           }
           return loaded;
@@ -141,10 +170,22 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
       }
     } catch (e) {}
     const defaults = Array.from({ length: DEFAULT_COUNT }, (_, i) => {
-      // Set default action targets for slots 37 and 38
-      if (i === 36) return { assignedCC: null, assignedNote: 60, targets: [], actionTarget: 'stopAudio' as ButtonAction };
-      if (i === 37) return { assignedCC: null, assignedNote: 61, targets: [], actionTarget: 'toggleMic' as ButtonAction };
-      return { assignedCC: null, assignedNote: null, targets: [], actionTarget: null };
+      // Slots 37-46 (indices 36-45) are pan presets
+      if (i >= 36 && i <= 45) {
+        const presetIndex = i - 36;
+        return { 
+          assignedCC: null, 
+          assignedNote: 60 + presetIndex, 
+          targets: [], 
+          actionTarget: null, 
+          panPresetId: availablePanPresets[presetIndex]?.id || `preset${presetIndex + 1}` 
+        };
+      }
+      // Slot 47 (index 46) is Stop Audio
+      if (i === 46) return { assignedCC: null, assignedNote: 70, targets: [], actionTarget: 'stopAudio' as ButtonAction, panPresetId: null };
+      // Slot 48 (index 47) is Toggle Mic
+      if (i === 47) return { assignedCC: null, assignedNote: 71, targets: [], actionTarget: 'toggleMic' as ButtonAction, panPresetId: null };
+      return { assignedCC: null, assignedNote: null, targets: [], actionTarget: null, panPresetId: null };
     });
     return defaults;
   });
@@ -170,6 +211,7 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
   // Use refs to avoid stale closures in MIDI message handler
   const mappingsRef = useRef(mappings);
   const onButtonActionRef = useRef(onButtonAction);
+  const onPanPresetRef = useRef(onPanPreset);
 
   // Param ranges - used to map 0..127 to param ranges
   const paramRanges = useParamRanges();
@@ -185,7 +227,8 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
   
   useEffect(() => {
     onButtonActionRef.current = onButtonAction;
-  }, [onButtonAction]);
+    onPanPresetRef.current = onPanPreset;
+  }, [onButtonAction, onPanPreset]);
 
   useEffect(() => {
     let mounted = true;
@@ -235,18 +278,18 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
     const next = mappings.slice();
     for (let i = 0; i < 36 && i < candidates.length; i++) { // Only assign first 36 slots
       // assign a default CC number from 1-36
-      next[i] = { assignedCC: i + 1, assignedNote: null, targets: [candidates[i]], actionTarget: null };
+      next[i] = { assignedCC: i + 1, assignedNote: null, targets: [candidates[i]], actionTarget: null, panPresetId: null };
     }
     
     // Special mappings: Params 34-36 (CC 34-36) for Overdrive effect
     const overdriveEffect = effects.find((e: any) => e.type === 'Overdrive');
     if (overdriveEffect) {
       // Param 34 (index 33) -> CC 34 -> outputGain
-      next[33] = { assignedCC: 34, assignedNote: null, targets: [{ effectId: overdriveEffect.id, paramKey: 'outputGain' }], actionTarget: null };
+      next[33] = { assignedCC: 34, assignedNote: null, targets: [{ effectId: overdriveEffect.id, paramKey: 'outputGain' }], actionTarget: null, panPresetId: null };
       // Param 35 (index 34) -> CC 35 -> drive
-      next[34] = { assignedCC: 35, assignedNote: null, targets: [{ effectId: overdriveEffect.id, paramKey: 'drive' }], actionTarget: null };
+      next[34] = { assignedCC: 35, assignedNote: null, targets: [{ effectId: overdriveEffect.id, paramKey: 'drive' }], actionTarget: null, panPresetId: null };
       // Param 36 (index 35) -> CC 36 -> curveAmount
-      next[35] = { assignedCC: 36, assignedNote: null, targets: [{ effectId: overdriveEffect.id, paramKey: 'curveAmount' }], actionTarget: null };
+      next[35] = { assignedCC: 36, assignedNote: null, targets: [{ effectId: overdriveEffect.id, paramKey: 'curveAmount' }], actionTarget: null, panPresetId: null };
     }
     
     setMappings(next);
@@ -335,7 +378,7 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
       logger.debug('[MIDI] Checking', mappingsRef.current.length, 'mappings for note', note);
       // find mappings assigned to this note
       mappingsRef.current.forEach((slot, idx) => {
-        logger.debug('[MIDI] Slot', idx, 'assignedNote:', slot.assignedNote, 'actionTarget:', slot.actionTarget);
+        logger.debug('[MIDI] Slot', idx, 'assignedNote:', slot.assignedNote, 'actionTarget:', slot.actionTarget, 'panPresetId:', slot.panPresetId);
         if (slot.assignedNote === note) {
           logger.debug('[MIDI] Match found! Slot', idx, 'has note', note);
           // visual flash
@@ -343,15 +386,28 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
           setTimeout(() => setFlashSlots((s) => ({ ...s, [idx]: false })), 220);
           
           // If this slot has an action target, trigger it
-          const callback = onButtonActionRef.current;
-          logger.debug('[MIDI] Callback exists?', !!callback, 'actionTarget:', slot.actionTarget);
-          if (slot.actionTarget && callback) {
+          const actionCallback = onButtonActionRef.current;
+          logger.debug('[MIDI] Action callback exists?', !!actionCallback, 'actionTarget:', slot.actionTarget);
+          if (slot.actionTarget && actionCallback) {
             try {
               logger.debug('[MIDI] Calling callback for action:', slot.actionTarget);
-              callback(slot.actionTarget);
+              actionCallback(slot.actionTarget);
               logger.debug('[MIDI] Triggered action:', slot.actionTarget, 'from note', note);
             } catch (e) {
               logger.warn('[MIDI] Failed to trigger action', slot.actionTarget, e);
+            }
+          }
+          
+          // If this slot has a pan preset, trigger it
+          const panCallback = onPanPresetRef.current;
+          logger.debug('[MIDI] Pan callback exists?', !!panCallback, 'panPresetId:', slot.panPresetId);
+          if (slot.panPresetId && panCallback) {
+            try {
+              logger.debug('[MIDI] Calling callback for pan preset:', slot.panPresetId);
+              panCallback(slot.panPresetId);
+              logger.debug('[MIDI] Triggered pan preset:', slot.panPresetId, 'from note', note);
+            } catch (e) {
+              logger.warn('[MIDI] Failed to trigger pan preset', slot.panPresetId, e);
             }
           }
         }
@@ -367,7 +423,7 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
     const next = mappings.slice();
     // Preserve actionTarget if it exists (for predefined action slots)
     const actionTarget = next[idx].actionTarget;
-    next[idx] = { assignedCC: null, assignedNote: null, targets: [], actionTarget };
+    next[idx] = { assignedCC: null, assignedNote: null, targets: [], actionTarget, panPresetId: null };
     setMappings(next);
   }
 
@@ -465,8 +521,8 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
                   <div className="flex-1">
                     <div className="text-sm font-semibold">{initialLabels[i]}</div>
                     <div className="mt-2 space-y-2">
-                      {/* Show CC field for non-action slots, Note field for action slots */}
-                      {slot.actionTarget ? (
+                      {/* Show CC field for effect params, Note field for actions and presets */}
+                      {slot.actionTarget || slot.panPresetId ? (
                         <div className="flex items-center gap-2">
                           <label className="text-xs text-gray-600 w-10">Note</label>
                           <input type="number" min={0} max={127} value={slot.assignedNote ?? ""} onChange={(e) => {
@@ -493,11 +549,31 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
                         <div className="p-2 bg-blue-50 rounded border border-blue-200">
                           <div className="text-xs font-medium text-blue-800">Action: {slot.actionTarget}</div>
                         </div>
+                      ) : slot.panPresetId ? (
+                        <div className="p-2 bg-purple-50 rounded border border-purple-200">
+                          <div className="text-xs font-medium text-purple-800">Pan Preset: {availablePanPresets.find(p => p.id === slot.panPresetId)?.name || slot.panPresetId}</div>
+                          {/* Only allow removal for non-dedicated preset slots (before slot 37) */}
+                          {i < 36 && (
+                            <button onClick={() => {
+                              const next = mappings.slice();
+                              next[i] = { ...next[i], panPresetId: null };
+                              setMappings(next);
+                            }} className="mt-1 px-2 py-0.5 border rounded text-xs text-red-600">Remove</button>
+                          )}
+                        </div>
                       ) : (
                         <>
                           <div className="flex items-center gap-2">
                             <div className="text-xs font-medium">Targets</div>
                             <button onClick={() => addTarget(i)} className="px-2 py-0.5 border rounded text-xs">Add</button>
+                            {/* Only allow adding pan preset for slots 1-36 (not dedicated preset/action slots) */}
+                            {availablePanPresets.length > 0 && i < 36 && (
+                              <button onClick={() => {
+                                const next = mappings.slice();
+                                next[i] = { ...next[i], panPresetId: availablePanPresets[0].id, targets: [], assignedNote: next[i].assignedNote ?? 62 + i };
+                                setMappings(next);
+                              }} className="px-2 py-0.5 border rounded text-xs bg-purple-50">Pan Preset</button>
+                            )}
                           </div>
                           <div className="mt-2 space-y-2">
                             {(slot.targets || []).map((t, ti) => (
@@ -519,6 +595,23 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
                           </div>
                         </>
                       )}
+                      {slot.panPresetId && availablePanPresets.length > 0 && (
+                        <div className="mt-2">
+                          <select 
+                            value={slot.panPresetId} 
+                            onChange={(e) => {
+                              const next = mappings.slice();
+                              next[i] = { ...next[i], panPresetId: e.target.value };
+                              setMappings(next);
+                            }} 
+                            className="p-1 text-xs border w-full"
+                          >
+                            {availablePanPresets.map((preset) => (
+                              <option key={preset.id} value={preset.id}>{preset.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -527,7 +620,7 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
           })}
         </div>
       </div>
-      <div className="mt-2 text-xs text-gray-600">Tip: click Learn, then move a CC controller (for params 1-36) or press a MIDI note (for button actions 37-38). Channel can be set to Any or 1–16.</div>
+      <div className="mt-2 text-xs text-gray-600">Tip: click Learn, then move a CC controller (for effect params) or press a MIDI note (for actions and pan presets). Params 1-36 use CC, Actions and Pan Presets use MIDI notes.</div>
       <div className="mt-3 flex gap-2 flex-wrap">
         <button
           onClick={async () => {

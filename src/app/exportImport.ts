@@ -1,5 +1,11 @@
 // Export/Import utilities for effect parameters and MIDI CC configurations
 
+export interface PanPreset {
+  id: string;
+  name: string;
+  pans: { [voiceId: string]: number };
+}
+
 export interface ExportedConfig {
   version: string;
   timestamp: string;
@@ -14,8 +20,11 @@ export interface ExportedConfig {
     assignedNote?: number | null;
     targets: Array<{ effectId: string; paramKey: string }>;
     actionTarget?: string | null;
+    panPresetId?: string | null;
   }>;
   midiChannel?: number;
+  panPresets?: PanPreset[];
+  currentPanPresetId?: string;
 }
 
 /**
@@ -24,7 +33,9 @@ export interface ExportedConfig {
 export function exportConfig(
   effectsList: Array<{ id: string; type: string; params: any; bypass?: boolean }>,
   midiMappings?: any[],
-  midiChannel?: number
+  midiChannel?: number,
+  panPresets?: PanPreset[],
+  currentPanPresetId?: string
 ): ExportedConfig {
   return {
     version: '1.0',
@@ -37,12 +48,14 @@ export function exportConfig(
     })),
     midiMappings: midiMappings || [],
     midiChannel: midiChannel ?? 1,
+    panPresets: panPresets || [],
+    currentPanPresetId: currentPanPresetId,
   };
 }
 
 /**
  * Import effect parameters and MIDI CC configurations
- * Returns { effects, midiMappings, midiChannel } ready to be applied
+ * Returns { effects, midiMappings, midiChannel, panPresets, currentPanPresetId } ready to be applied
  */
 export function importConfig(configJson: string): {
   effects: Array<{ id: string; type: string; params: any; bypass?: boolean }>;
@@ -51,8 +64,11 @@ export function importConfig(configJson: string): {
     assignedNote: number | null;
     targets: Array<{ effectId: string; paramKey: string }>;
     actionTarget: string | null;
+    panPresetId: string | null;
   }>;
   midiChannel: number;
+  panPresets: PanPreset[];
+  currentPanPresetId: string | null;
 } {
   const config: ExportedConfig = JSON.parse(configJson);
 
@@ -72,8 +88,11 @@ export function importConfig(configJson: string): {
       assignedNote: m.assignedNote ?? null,
       targets: m.targets || [],
       actionTarget: m.actionTarget ?? null,
+      panPresetId: m.panPresetId ?? null,
     })),
     midiChannel: config.midiChannel ?? 1,
+    panPresets: config.panPresets || [],
+    currentPanPresetId: config.currentPanPresetId ?? null,
   };
 }
 
