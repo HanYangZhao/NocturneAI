@@ -1124,9 +1124,15 @@ export default function AudioChatClean() {
                             mappings: config.midiMappings,
                             channel: config.midiChannel,
                           }));
+                          // Dispatch storage event to notify MIDI controller to reload
+                          window.dispatchEvent(new StorageEvent('storage', {
+                            key: 'nocturne_midi_mappings_v1',
+                            newValue: localStorage.getItem('nocturne_midi_mappings_v1'),
+                            storageArea: localStorage
+                          }));
                         } catch (e) {}
                       }
-                      alert('Effects config loaded from file!' + (config.midiMappings?.length ? ' MIDI mappings also restored.' : ''));
+                      alert('Effects config loaded from file!' + (config.midiMappings?.length ? ' MIDI mappings also restored. Please reopen MIDI CC Mapper to see changes.' : ''));
                     } catch (e) {
                       alert('Failed to import: ' + (e instanceof Error ? e.message : String(e)));
                     }
@@ -1137,7 +1143,7 @@ export default function AudioChatClean() {
                 </button>
               </div>
             </div>
-            <div className="mt-2 grid grid-cols-2 grid-rows-4 gap-3">
+            <div className="mt-2 grid grid-cols-2 grid-rows-5 gap-3">
               {effectsList.map((fx, idx) => (
                 <div key={fx.id} className="p-2 border rounded bg-gray-50 text-xs">
                   <div className="flex items-center justify-between">
@@ -1197,6 +1203,7 @@ export default function AudioChatClean() {
                           </div>
                         );
                       }
+
                       // fallback: show value as text (read-only)
                       return (
                         <div key={k} className="flex flex-col text-xs">

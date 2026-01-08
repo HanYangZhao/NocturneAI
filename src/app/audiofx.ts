@@ -51,6 +51,7 @@ const defaultParamsByType: Record<string, any> = {
   Tremolo: { intensity: 0.3, rate: 5, stereoPhase: 0, bypass: false },
   Bitcrusher: { bits: 4, normfreq: 0.1, bufferSize: 4096, bypass: false },
   Chorus: { rate: 1.5, feedback: 0.4, depth: 0.7, delay: 0.0045, bypass: false },
+  Overdrive: { outputGain: -9.154, drive: 0.197, curveAmount: 0.979, algorithmIndex: 0, bypass: false },
 };
 
 export function createEffect(id: string, type: string, params?: any) {

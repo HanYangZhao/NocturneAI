@@ -13,7 +13,7 @@ export function formatNumericValue(n: unknown): string {
 }
 
 // Available effect types
-export const EFFECT_TYPES = ['Delay', 'Phaser', 'Convolver', 'Compressor', 'Filter', 'Tremolo', 'Bitcrusher', 'Chorus'] as const;
+export const EFFECT_TYPES = ['Delay', 'Phaser', 'Convolver', 'Compressor', 'Filter', 'Tremolo', 'Bitcrusher', 'Chorus', 'Overdrive'] as const;
 
 // Filter type options for Filter effect
 export const FILTER_TYPES = ['lowpass', 'highpass', 'bandpass', 'lowshelf', 'highshelf', 'peaking', 'notch', 'allpass'] as const;
@@ -56,6 +56,11 @@ export function useParamRanges(): Record<string, { min: number; max: number; ste
     bufferSize: { min: 256, max: 16384, step: 127 },
     // Chorus params
     delay: { min: 0, max: 1, step: 0.0079 },
+    // Overdrive params
+    outputGain: { min: -42, max: 0, step: 0.33 },
+    drive: { min: 0, max: 1, step: 0.0079 },
+    curveAmount: { min: 0, max: 1, step: 0.0079 },
+    algorithmIndex: { min: 0, max: 5, step: 1 },
     // Legacy/other
     resonance: { min: 0, max: 4, step: 0.0315 },
   };
@@ -69,7 +74,7 @@ type MidiControllerProps = {
 const STORAGE_KEY = "nocturne_midi_mappings_v1";
 
 export default function MidiController({ paramLabels = [], onMidiCC }: MidiControllerProps) {
-  const DEFAULT_COUNT = 33;
+  const DEFAULT_COUNT = 36;
   const initialLabels = Array.from({ length: DEFAULT_COUNT }, (_, i) => paramLabels[i] ?? `Param ${i + 1}`);
 
   // mapping slots: each slot can have assignedCC (number|null) and targets array [{ effectId, paramKey }]
@@ -168,9 +173,21 @@ export default function MidiController({ paramLabels = [], onMidiCC }: MidiContr
     if (candidates.length === 0) return;
     const next = mappings.slice();
     for (let i = 0; i < next.length && i < candidates.length; i++) {
-      // assign a default CC number from 1-33
+      // assign a default CC number from 1-36
       next[i] = { assignedCC: i + 1, targets: [candidates[i]] };
     }
+    
+    // Special mappings: Params 34-36 (CC 34-36) for Overdrive effect
+    const overdriveEffect = effects.find((e: any) => e.type === 'Overdrive');
+    if (overdriveEffect) {
+      // Param 34 (index 33) -> CC 34 -> outputGain
+      next[33] = { assignedCC: 34, targets: [{ effectId: overdriveEffect.id, paramKey: 'outputGain' }] };
+      // Param 35 (index 34) -> CC 35 -> drive
+      next[34] = { assignedCC: 35, targets: [{ effectId: overdriveEffect.id, paramKey: 'drive' }] };
+      // Param 36 (index 35) -> CC 36 -> curveAmount
+      next[35] = { assignedCC: 36, targets: [{ effectId: overdriveEffect.id, paramKey: 'curveAmount' }] };
+    }
+    
     setMappings(next);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
