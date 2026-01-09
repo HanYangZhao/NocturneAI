@@ -1188,7 +1188,7 @@ export default function AudioChatClean() {
                           midiChannel = parsed.channel;
                         }
                       } catch (e) {}
-                      const config = ExportImport.exportConfig(effectsList, midiMappings, midiChannel, panPresets, currentPanPresetId);
+                      const config = ExportImport.exportConfig(effectsList, midiMappings, midiChannel, panPresets, currentPanPresetId, chainList);
                       ExportImport.downloadConfigAsFile(config, `nocturne-effects-${new Date().toISOString().split('T')[0]}.json`);
                     } catch (e) {
                       alert('Failed to export: ' + (e instanceof Error ? e.message : String(e)));
@@ -1216,6 +1216,11 @@ export default function AudioChatClean() {
                             AudioFX.updateEffectParams(f.id, { bypass: f.bypass });
                           }
                         } catch (e) {}
+                      }
+                      // Restore signal chain if present
+                      if (config.signalChain && config.signalChain.length > 0) {
+                        setChainList(config.signalChain);
+                        AudioFX.setChain(config.signalChain);
                       }
                       // Restore pan preset if present
                       if (config.panPresets && config.panPresets.length > 0) {

@@ -15,6 +15,7 @@ export interface ExportedConfig {
     params: any;
     bypass?: boolean;
   }>;
+  signalChain?: string[];
   midiMappings?: Array<{
     assignedCC: number | null;
     assignedNote?: number | null;
@@ -35,7 +36,8 @@ export function exportConfig(
   midiMappings?: any[],
   midiChannel?: number,
   panPresets?: PanPreset[],
-  currentPanPresetId?: string
+  currentPanPresetId?: string,
+  signalChain?: string[]
 ): ExportedConfig {
   return {
     version: '1.0',
@@ -46,6 +48,7 @@ export function exportConfig(
       params: e.params || {},
       bypass: e.bypass,
     })),
+    signalChain: signalChain || [],
     midiMappings: midiMappings || [],
     midiChannel: midiChannel ?? 1,
     panPresets: panPresets || [],
@@ -55,7 +58,7 @@ export function exportConfig(
 
 /**
  * Import effect parameters and MIDI CC configurations
- * Returns { effects, midiMappings, midiChannel, panPresets, currentPanPresetId } ready to be applied
+ * Returns { effects, midiMappings, midiChannel, panPresets, currentPanPresetId, signalChain } ready to be applied
  */
 export function importConfig(configJson: string): {
   effects: Array<{ id: string; type: string; params: any; bypass?: boolean }>;
@@ -69,6 +72,7 @@ export function importConfig(configJson: string): {
   midiChannel: number;
   panPresets: PanPreset[];
   currentPanPresetId: string | null;
+  signalChain: string[];
 } {
   const config: ExportedConfig = JSON.parse(configJson);
 
@@ -83,6 +87,7 @@ export function importConfig(configJson: string): {
       params: e.params || {},
       bypass: e.bypass ?? false,
     })),
+    signalChain: config.signalChain || [],
     midiMappings: (config.midiMappings || []).map((m) => ({
       assignedCC: m.assignedCC ?? null,
       assignedNote: m.assignedNote ?? null,
