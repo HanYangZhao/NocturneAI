@@ -13,7 +13,7 @@ export function formatNumericValue(n: unknown): string {
 }
 
 // Available effect types
-export const EFFECT_TYPES = ['Delay', 'Phaser', 'Convolver', 'Compressor', 'Filter', 'Tremolo', 'Bitcrusher', 'Chorus', 'Overdrive'] as const;
+export const EFFECT_TYPES = ['Delay', 'Phaser', 'Convolver', 'Compressor', 'Filter', 'Tremolo', 'Bitcrusher', 'Chorus', 'Overdrive', 'RingModulator'] as const;
 
 // Filter type options for Filter effect
 export const FILTER_TYPES = ['lowpass', 'highpass', 'bandpass', 'lowshelf', 'highshelf', 'peaking', 'notch', 'allpass'] as const;
@@ -61,6 +61,9 @@ export function useParamRanges(): Record<string, { min: number; max: number; ste
     drive: { min: 0, max: 1, step: 0.0079 },
     curveAmount: { min: 0, max: 1, step: 0.0079 },
     algorithmIndex: { min: 0, max: 5, step: 1 },
+    // RingModulator params
+    // frequency parameter uses shared 'frequency' key
+    // depth parameter uses shared 'depth' key
     // Legacy/other
     resonance: { min: 0, max: 4, step: 0.0315 },
   };

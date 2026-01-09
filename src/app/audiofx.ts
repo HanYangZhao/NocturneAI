@@ -25,19 +25,13 @@ export function initTuna(ac: AudioContext) {
   if (tunaInstance) return tunaInstance;
   acRef = ac;
   try {
+    // Use local tuna.js
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const Tuna = require('tunajs');
+    const Tuna = require('./tuna.js').default;
     tunaInstance = new Tuna(ac);
   } catch (e) {
-    // fallback to global
-    // @ts-ignore
-    if ((window as any).Tuna) {
-      // @ts-ignore
-      tunaInstance = new (window as any).Tuna(ac);
-    } else {
-      tunaInstance = null;
-      console.warn('Tuna.js not found. Effects disabled.');
-    }
+    console.error('Failed to initialize local Tuna.js', e);
+    tunaInstance = null;
   }
   return tunaInstance;
 }
@@ -52,6 +46,7 @@ const defaultParamsByType: Record<string, any> = {
   Bitcrusher: { bits: 4, normfreq: 0.1, bufferSize: 4096, bypass: false },
   Chorus: { rate: 1.5, feedback: 0.4, depth: 0.7, delay: 0.0045, bypass: false },
   Overdrive: { outputGain: -9.154, drive: 0.197, curveAmount: 0.979, algorithmIndex: 0, bypass: false },
+  RingModulator: { frequency: 30, depth: 1, bufferSize: 4096, bypass: false },
 };
 
 export function createEffect(id: string, type: string, params?: any) {

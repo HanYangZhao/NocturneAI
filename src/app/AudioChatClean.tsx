@@ -82,6 +82,10 @@ export default function AudioChatClean() {
 
   // Pan presets
   const [panPresets, setPanPresets] = useState<PanPreset[]>(() => {
+    // Check if we're in the browser before accessing localStorage
+    if (typeof window === 'undefined') {
+      return DEFAULT_PAN_PRESETS;
+    }
     try {
       const stored = localStorage.getItem('nocturne_pan_presets');
       if (stored) {
@@ -874,6 +878,13 @@ export default function AudioChatClean() {
   async function sendTextToOpenAI(text: string) {
     try {
       const dc = await ensureOpenAIConnection();
+      
+      // Check if data channel is open before sending
+      if (dc.readyState !== "open") {
+        logger.error("Data channel is not open, current state:", dc.readyState);
+        return;
+      }
+      
       // Clear previous assistant output before sending new user prompt
       assistantResponseRef.current = "";
       setAssistantResponse("");
@@ -894,8 +905,12 @@ export default function AudioChatClean() {
         };
         logger.debug("Sending system instruction to OpenAI data channel", sysEvent);
         try {
-          dc.send(JSON.stringify(sysEvent));
-          instructionSentRef.current = true;
+          if (dc.readyState === "open") {
+            dc.send(JSON.stringify(sysEvent));
+            instructionSentRef.current = true;
+          } else {
+            logger.error("Data channel closed before sending system instruction");
+          }
         } catch (sendErr) {
           logger.error("Data channel send failed (system)", sendErr);
         }
@@ -916,7 +931,11 @@ export default function AudioChatClean() {
       };
       logger.debug("Sending user event to OpenAI data channel", event);
       try {
-        dc.send(JSON.stringify(event));
+        if (dc.readyState === "open") {
+          dc.send(JSON.stringify(event));
+        } else {
+          logger.error("Data channel closed before sending user message");
+        }
       } catch (sendErr) {
         logger.error("Data channel send failed (user)", sendErr);
       }
@@ -924,7 +943,11 @@ export default function AudioChatClean() {
       const responseCreate = { type: "response.create" };
       logger.debug("Sending response.create to OpenAI data channel", responseCreate);
       try {
-        dc.send(JSON.stringify(responseCreate));
+        if (dc.readyState === "open") {
+          dc.send(JSON.stringify(responseCreate));
+        } else {
+          logger.error("Data channel closed before sending response.create");
+        }
       } catch (sendErr) {
         logger.error("Data channel send failed (response.create)", sendErr);
       }
