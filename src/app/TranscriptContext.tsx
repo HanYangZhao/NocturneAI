@@ -1,0 +1,209 @@
+"use client";
+
+import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
+
+export interface TranscriptMessage {
+  role: 'user' | 'assistant';
+  text: string;
+  timestamp: number;
+  partial?: boolean;
+}
+
+interface TranscriptContextType {
+  messages: TranscriptMessage[];
+  currentUserText: string;
+  currentAssistantText: string;
+  addUserText: (text: string, partial?: boolean) => void;
+  addAssistantText: (text: string, partial?: boolean) => void;
+  clearMessages: () => void;
+  activeEffects: Array<{ id: string; type: string; params: any }>;
+  setActiveEffects: (effects: Array<{ id: string; type: string; params: any }>) => void;
+}
+
+const TranscriptContext = createContext<TranscriptContextType | undefined>(undefined);
+
+export function TranscriptProvider({ children }: { children: React.ReactNode }) {
+  const [messages, setMessages] = useState<TranscriptMessage[]>([]);
+  const [currentUserText, setCurrentUserText] = useState('');
+  const [currentAssistantText, setCurrentAssistantText] = useState('');
+  const [activeEffects, setActiveEffects] = useState<Array<{ id: string; type: string; params: any }>>([]);
+  const [lastUserUpdate, setLastUserUpdate] = useState(0);
+  const [lastAssistantUpdate, setLastAssistantUpdate] = useState(0);
+  const lastUserMessageRef = useRef<TranscriptMessage | null>(null);
+  const lastAssistantMessageRef = useRef<TranscriptMessage | null>(null);
+  const channelRef = useRef<BroadcastChannel | null>(null);
+
+  // Initialize BroadcastChannel for cross-tab communication
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const channel = new BroadcastChannel('nocturne-visualizer');
+    channelRef.current = channel;
+
+    // Listen for messages from other tabs
+    channel.onmessage = (event) => {
+      const { type, data } = event.data;
+
+      switch (type) {
+        case 'USER_TEXT': {
+          const text = typeof data?.text === 'string' ? data.text : '';
+          const isPartial = Boolean(data?.partial);
+
+          if (isPartial) {
+            setCurrentUserText(text);
+            setCurrentAssistantText('');
+          } else {
+            setCurrentUserText(text);
+            if (text.trim() && data?.message) {
+              setMessages(prev => [...prev, data.message]);
+            }
+          }
+          break;
+        }
+        case 'ASSISTANT_TEXT': {
+          const text = typeof data?.text === 'string' ? data.text : '';
+          const isPartial = Boolean(data?.partial);
+
+          setCurrentAssistantText(text);
+          if (text) {
+            setCurrentUserText('');
+          }
+
+          if (!isPartial && text.trim() && data?.message) {
+            setMessages(prev => [...prev, data.message]);
+          }
+          break;
+        }
+        case 'ACTIVE_EFFECTS':
+          setActiveEffects(data);
+          break;
+        case 'CLEAR_MESSAGES':
+          setMessages([]);
+          setCurrentUserText('');
+          setCurrentAssistantText('');
+          break;
+      }
+    };
+
+    return () => {
+      channel.close();
+    };
+  }, []);
+
+  const addUserText = (text: string, partial: boolean = false) => {
+    const now = Date.now();
+    setLastUserUpdate(now);
+    
+    if (partial) {
+      // User is speaking - show partial transcript
+      setCurrentUserText(text);
+      
+      // Broadcast partial text to other tabs
+      channelRef.current?.postMessage({
+        type: 'USER_TEXT',
+        data: { text, partial, message: null, timestamp: now },
+      });
+    } else {
+      // User finished speaking - commit to history but keep text visible
+      setCurrentUserText(text);
+      
+      if (text.trim()) {
+        const message: TranscriptMessage = {
+          role: 'user',
+          text,
+          timestamp: now,
+          partial: false,
+        };
+        
+        lastUserMessageRef.current = message;
+        setMessages(prev => [...prev, message]);
+        
+        // Broadcast to other tabs
+        channelRef.current?.postMessage({
+          type: 'USER_TEXT',
+          data: { text, partial, message, timestamp: now },
+        });
+      }
+    }
+  };
+
+  const addAssistantText = (text: string, partial: boolean = false) => {
+    const now = Date.now();
+    setLastAssistantUpdate(now);
+    
+    // Assistant is responding - show it and clear user text
+    setCurrentAssistantText(text);
+    setCurrentUserText('');
+    
+    if (!partial && text.trim()) {
+      // Final response - commit to history
+      const message: TranscriptMessage = {
+        role: 'assistant',
+        text,
+        timestamp: now,
+        partial: false,
+      };
+      
+      lastAssistantMessageRef.current = message;
+      setMessages(prev => [...prev, message]);
+      
+      // Broadcast to other tabs
+      channelRef.current?.postMessage({
+        type: 'ASSISTANT_TEXT',
+        data: { text, partial, message, timestamp: now },
+      });
+    } else if (partial) {
+      // Broadcast partial text to other tabs
+      channelRef.current?.postMessage({
+        type: 'ASSISTANT_TEXT',
+        data: { text, partial, message: null, timestamp: now },
+      });
+    }
+  };
+
+  const clearMessages = () => {
+    setMessages([]);
+    setCurrentUserText('');
+    setCurrentAssistantText('');
+    lastUserMessageRef.current = null;
+    lastAssistantMessageRef.current = null;
+    
+    // Broadcast to other tabs
+    channelRef.current?.postMessage({ type: 'CLEAR_MESSAGES' });
+  };
+
+  const setActiveEffectsWithBroadcast = (effects: Array<{ id: string; type: string; params: any }>) => {
+    setActiveEffects(effects);
+    
+    // Broadcast to other tabs
+    channelRef.current?.postMessage({
+      type: 'ACTIVE_EFFECTS',
+      data: effects,
+    });
+  };
+
+  return (
+    <TranscriptContext.Provider
+      value={{
+        messages,
+        currentUserText,
+        currentAssistantText,
+        addUserText,
+        addAssistantText,
+        clearMessages,
+        activeEffects,
+        setActiveEffects: setActiveEffectsWithBroadcast,
+      }}
+    >
+      {children}
+    </TranscriptContext.Provider>
+  );
+}
+
+export function useTranscript() {
+  const context = useContext(TranscriptContext);
+  if (context === undefined) {
+    throw new Error('useTranscript must be used within a TranscriptProvider');
+  }
+  return context;
+}

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { TranscriptProvider } from "./TranscriptContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,19 +32,30 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <header className="w-full bg-white border-b">
-          <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Link href="/" className="font-semibold">Nocturne AI</Link>
-              <nav className="flex items-center gap-2 text-sm">
-                <Link href="/">Home</Link>
-                <Link href="/midi-map" className="px-2 py-1 border rounded text-xs">MIDI Mapper</Link>
-              </nav>
+        <TranscriptProvider>
+          <header className="w-full bg-white border-b">
+            <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <Link href="/" className="font-semibold">Nocturne AI</Link>
+                <nav className="flex items-center gap-2 text-sm">
+                  <Link href="/">Home</Link>
+                  <Link href="/midi-map" className="px-2 py-1 border rounded text-xs">MIDI Mapper</Link>
+                  {/* <Link href="/visualizer" className="px-2 py-1 border rounded text-xs bg-purple-100">Visualizer</Link> */}
+                  <a 
+                    href="/visualizer" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="px-2 py-1 border rounded text-xs"
+                  >
+                    <span>Open Visualizer</span>
+                  </a>
+                </nav>
+              </div>
+              <div className="text-xs text-gray-500">v0.1</div>
             </div>
-            <div className="text-xs text-gray-500">v0.1</div>
-          </div>
-        </header>
-        <main className="max-w-6xl mx-auto p-4">{children}</main>
+          </header>
+          <main className="max-w-6xl mx-auto p-4">{children}</main>
+        </TranscriptProvider>
       </body>
     </html>
   );

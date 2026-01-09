@@ -15,8 +15,12 @@
   import voicesConfig from "./voices.json";
   import TriangleMixer from "./TriangleMixer";
   import PanControl, { DEFAULT_PAN_PRESETS, type PanPreset } from "./PanControl";
+  import { useTranscript } from "./TranscriptContext";
 
 export default function AudioChatClean() {
+      // Transcript context for visualizer
+      const { addUserText, addAssistantText, setActiveEffects } = useTranscript();
+      
       // Stop TTS audio playback
       function stopTTSPlayback() {
         // Stop element-based playback
@@ -402,13 +406,14 @@ export default function AudioChatClean() {
         const ef = AudioFX.getEffects() || [];
         const next = ef.map((e: any) => ({ id: e.id, type: e.type, params: e.params || {}, bypass: !!(e.params && e.params.bypass) }));
         setEffectsList(next);
+        setActiveEffects(next); // Sync effects to visualizer context
       } catch (e) {
         // ignore
       }
     }
     window.addEventListener('audiofx:paramsUpdated', handler as EventListener);
     return () => { window.removeEventListener('audiofx:paramsUpdated', handler as EventListener); };
-  }, []);
+  }, [setActiveEffects]);
 
   async function hashPassword(pw: string) {
     try {
@@ -497,7 +502,10 @@ export default function AudioChatClean() {
       connection.on(RealtimeEvents.PARTIAL_TRANSCRIPT, (data: unknown) => {
         if (typeof data === 'object' && data !== null && 'text' in data) {
           const d = data as { text?: unknown };
-          if (typeof d.text === 'string') setPartialTranscript(d.text);
+          if (typeof d.text === 'string') {
+            setPartialTranscript(d.text);
+            addUserText(d.text, true); // Send partial transcript to visualizer
+          }
         }
       });
       connection.on(RealtimeEvents.COMMITTED_TRANSCRIPT, async (data: unknown) => {
@@ -516,6 +524,7 @@ export default function AudioChatClean() {
           setTranscript(text ?? "");
           setPartialTranscript("");
           setTranscriptHistory((h) => [...h, { role: "user", text }]);
+          addUserText(text, false); // Send committed transcript to visualizer
           logger.info("Committed transcript:", text);
           if (text) await sendTextToOpenAI(text);
         }
@@ -867,6 +876,8 @@ export default function AudioChatClean() {
     const next = cur + text;
     assistantResponseRef.current = next;
     setAssistantResponse(next);
+    // Send to visualizer (partial while streaming, final when done)
+    addAssistantText(next, !done);
     // If done, push to transcript history and play TTS
     logger.debug(done)
     logger.debug(next.trim())
@@ -974,7 +985,6 @@ export default function AudioChatClean() {
     <div className="min-h-screen flex flex-col items-center justify-center gap-6 p-8">
       {/* Hidden audio element for TTS playback */}
       <audio ref={audioRef} style={{ display: 'none' }} />
-      <h1 className="text-2xl font-bold">Nocturne AI</h1>
       <div className="w-full max-w-6xl flex flex-col md:flex-row items-start gap-6">
         <div className="flex-1 max-w-xl bg-white p-4 rounded shadow">
           <div className="flex gap-2 mb-2">
