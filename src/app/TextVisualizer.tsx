@@ -408,7 +408,7 @@ export default function TextVisualizer() {
         )}
         {!displayedText && (
           <p 
-            className="text-gray-400 text-center drop-shadow-[0_0_20px_rgba(74,144,226,0.5)]"
+            className="text-white text-center drop-shadow-[0_0_20px_rgba(74,144,226,0.5)]"
             style={{
               fontSize: '36px',
               fontFamily: 'Lexend-Medium, Arial, sans-serif'
