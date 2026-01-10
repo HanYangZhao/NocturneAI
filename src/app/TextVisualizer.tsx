@@ -19,6 +19,7 @@ export default function TextVisualizer() {
   const [currentWindowIndex, setCurrentWindowIndex] = useState(0);
   const textStartTimeRef = useRef<number | null>(null);
   const lastFullTextRef = useRef<string>('');
+  const textMeshesRef = useRef<THREE.Mesh[]>([]);
 
   // Listen directly to BroadcastChannel for brightness updates (for cross-tab communication)
   // Also sync from context's particleBrightness for same-tab usage
@@ -341,7 +342,7 @@ export default function TextVisualizer() {
         if (particleOriginalColorsRef.current) {
           const originalColors = particleOriginalColorsRef.current;
           // Brightness effect: base 1.0 + up to 1.25x boost based on audio
-          const brightnessFactor = 0.5 + currentBrightness * 1.1;
+          const brightnessFactor = 0.4 + currentBrightness * 1.1;
           
           for (let i = 0; i < colors.length; i += 3) {
             // Get original color and apply brightness amplification
@@ -529,6 +530,38 @@ export default function TextVisualizer() {
     <div className="fixed inset-0 bg-black text-white flex items-center justify-center overflow-hidden">
       <div ref={containerRef} className="absolute inset-0" />
       
+      <style>{`
+        @keyframes smokeFormation {
+          0% {
+            opacity: 0;
+            filter: blur(8px) opacity(0);
+            transform: translate(-20px, 10px) scale(0.8);
+          }
+          50% {
+            filter: blur(4px);
+          }
+          100% {
+            opacity: 1;
+            filter: blur(0px);
+            transform: translate(0, 0) scale(1);
+          }
+        }
+        
+        @keyframes smokeGlow {
+          0%, 100% {
+            text-shadow: 
+              0 0 10px rgba(100, 200, 255, 0.4),
+              0 0 20px rgba(100, 200, 255, 0.2);
+          }
+          50% {
+            text-shadow: 
+              0 0 15px rgba(100, 200, 255, 0.6),
+              0 0 30px rgba(100, 200, 255, 0.4),
+              0 0 40px rgba(100, 200, 255, 0.2);
+          }
+        }
+      `}</style>
+      
       <div className="relative z-10 w-full px-8 pointer-events-none">
         {displayedText && (
           <div className="text-center">
@@ -554,8 +587,8 @@ export default function TextVisualizer() {
                   key={`${word}-${index}-${currentWindowIndex}`}
                   style={{
                     display: 'inline-block',
-                    animation: 'glitchIn 0.4s ease-out forwards',
-                    animationDelay: `${index * 50}ms`,
+                    animation: `smokeFormation 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards, smokeGlow 2s ease-in-out infinite`,
+                    animationDelay: `${index * 80}ms`,
                     opacity: 0
                   }}
                 >

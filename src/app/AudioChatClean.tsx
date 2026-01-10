@@ -563,8 +563,8 @@ export default function AudioChatClean() {
         commitStrategy: CommitStrategy.VAD,
         vadSilenceThresholdSecs: 1.5,
         vadThreshold: 0.7,
-        minSpeechDurationMs: 250,
-        minSilenceDurationMs: 250,
+        minSpeechDurationMs: 500,
+        minSilenceDurationMs: 500,
         includeTimestamps: false,
         microphone: {
           echoCancellation: true,
