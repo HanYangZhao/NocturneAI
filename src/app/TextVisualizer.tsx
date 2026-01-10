@@ -354,8 +354,8 @@ export default function TextVisualizer() {
           const material = particlesRef.current.material as THREE.PointsMaterial;
           const baseOpacity = 0.6;
           const baseSize = 0.5;
-          material.opacity = baseOpacity + currentBrightness * 0.2;
-          material.size = baseSize + currentBrightness * 0.5;
+          material.opacity = baseOpacity + currentBrightness * 0.7;
+          material.size = baseSize + currentBrightness * 0.4;
           
           particlesRef.current.geometry.attributes.color.needsUpdate = true;
         }
