@@ -1,5 +1,88 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: 'Lexend-Medium';
+  src: url('/Lexend-Medium.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes glitchIn {
+  0% {
+    opacity: 0;
+    transform: translateX(-10px) scaleX(0.8);
+    filter: blur(5px);
+    text-shadow: 5px 0 rgba(74, 144, 226, 0.8), -5px 0 rgba(226, 74, 144, 0.8);
+  }
+  20% {
+    opacity: 0.5;
+    transform: translateX(5px) scaleX(1.1);
+    filter: blur(2px);
+    text-shadow: 3px 0 rgba(74, 144, 226, 0.6), -3px 0 rgba(226, 74, 144, 0.6);
+  }
+  40% {
+    opacity: 0.8;
+    transform: translateX(-3px) scaleX(0.95);
+    filter: blur(1px);
+    text-shadow: 2px 0 rgba(74, 144, 226, 0.4), -2px 0 rgba(226, 74, 144, 0.4);
+  }
+  60% {
+    opacity: 1;
+    transform: translateX(2px) scaleX(1.05);
+    filter: blur(0.5px);
+    text-shadow: 1px 0 rgba(74, 144, 226, 0.2), -1px 0 rgba(226, 74, 144, 0.2);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scaleX(1);
+    filter: blur(0);
+    text-shadow: 0 0 30px rgba(74, 144, 226, 0.8);
+  }
+}
+
+@keyframes glitchOut {
+  0% {
+    opacity: 1;
+    transform: translateX(0) scaleX(1);
+    filter: blur(0);
+    text-shadow: 0 0 30px rgba(74, 144, 226, 0.8);
+  }
+  40% {
+    opacity: 0.8;
+    transform: translateX(3px) scaleX(1.05);
+    filter: blur(0.5px);
+    text-shadow: 2px 0 rgba(74, 144, 226, 0.4), -2px 0 rgba(226, 74, 144, 0.4);
+  }
+  60% {
+    opacity: 0.5;
+    transform: translateX(-5px) scaleX(0.9);
+    filter: blur(2px);
+    text-shadow: 4px 0 rgba(74, 144, 226, 0.6), -4px 0 rgba(226, 74, 144, 0.6);
+  }
+  80% {
+    opacity: 0.2;
+    transform: translateX(8px) scaleX(0.7);
+    filter: blur(4px);
+    text-shadow: 6px 0 rgba(74, 144, 226, 0.8), -6px 0 rgba(226, 74, 144, 0.8);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(15px) scaleX(0.5);
+    filter: blur(8px);
+    text-shadow: 10px 0 rgba(74, 144, 226, 1), -10px 0 rgba(226, 74, 144, 1);
+  }
+}
+
 :root {
   --background: #ffffff;
   --foreground: #000000;

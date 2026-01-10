@@ -18,6 +18,9 @@ interface TranscriptContextType {
   clearMessages: () => void;
   activeEffects: Array<{ id: string; type: string; params: any }>;
   setActiveEffects: (effects: Array<{ id: string; type: string; params: any }>) => void;
+  waveformData: Float32Array | null;
+  textDisplaySpeed: number; // milliseconds per word (default 400)
+  setTextDisplaySpeed: (speed: number) => void;
 }
 
 const TranscriptContext = createContext<TranscriptContextType | undefined>(undefined);
@@ -27,6 +30,8 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
   const [currentUserText, setCurrentUserText] = useState('');
   const [currentAssistantText, setCurrentAssistantText] = useState('');
   const [activeEffects, setActiveEffects] = useState<Array<{ id: string; type: string; params: any }>>([]);
+  const [waveformData, setWaveformData] = useState<Float32Array | null>(null);
+  const [textDisplaySpeed, setTextDisplaySpeed] = useState(400); // ms per word
   const [lastUserUpdate, setLastUserUpdate] = useState(0);
   const [lastAssistantUpdate, setLastAssistantUpdate] = useState(0);
   const lastUserMessageRef = useRef<TranscriptMessage | null>(null);
@@ -76,6 +81,16 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
         }
         case 'ACTIVE_EFFECTS':
           setActiveEffects(data);
+          break;
+        case 'WAVEFORM_DATA':
+          if (data && data instanceof Float32Array) {
+            setWaveformData(data);
+          }
+          break;
+        case 'TEXT_DISPLAY_SPEED':
+          if (typeof data === 'number') {
+            setTextDisplaySpeed(data);
+          }
           break;
         case 'CLEAR_MESSAGES':
           setMessages([]);
@@ -182,6 +197,16 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
     });
   };
 
+  const setTextDisplaySpeedWithBroadcast = (speed: number) => {
+    setTextDisplaySpeed(speed);
+    
+    // Broadcast to other tabs
+    channelRef.current?.postMessage({
+      type: 'TEXT_DISPLAY_SPEED',
+      data: speed,
+    });
+  };
+
   return (
     <TranscriptContext.Provider
       value={{
@@ -193,6 +218,9 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
         clearMessages,
         activeEffects,
         setActiveEffects: setActiveEffectsWithBroadcast,
+        waveformData,
+        textDisplaySpeed,
+        setTextDisplaySpeed: setTextDisplaySpeedWithBroadcast,
       }}
     >
       {children}

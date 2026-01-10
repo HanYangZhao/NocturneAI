@@ -19,7 +19,7 @@
 
 export default function AudioChatClean() {
       // Transcript context for visualizer
-      const { addUserText, addAssistantText, setActiveEffects } = useTranscript();
+      const { addUserText, addAssistantText, setActiveEffects, textDisplaySpeed, setTextDisplaySpeed } = useTranscript();
       
       // Stop TTS audio playback
       function stopTTSPlayback() {
@@ -1092,6 +1092,31 @@ export default function AudioChatClean() {
                     setPanPresets(updatedPresets);
                   }}
                 />
+              </div>
+            </div>
+            {/* Text Display Speed Control */}
+            <div className="mt-3">
+              <div className="p-3 border rounded bg-gray-50">
+                <label className="block text-sm font-medium mb-2">Text Display Speed (Visualizer)</label>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-gray-600">Fast</span>
+                  <input
+                    type="range"
+                    min="100"
+                    max="800"
+                    step="50"
+                    value={textDisplaySpeed}
+                    onChange={(e) => setTextDisplaySpeed(Number(e.target.value))}
+                    className="flex-1"
+                  />
+                  <span className="text-xs text-gray-600">Slow</span>
+                  <span className="text-xs font-mono bg-white px-2 py-1 rounded border">
+                    {textDisplaySpeed}ms/word
+                  </span>
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Controls how fast text windows advance (25 words per window)
+                </div>
               </div>
             </div>
             <label className="block text-sm font-medium mb-1">API Password</label>
