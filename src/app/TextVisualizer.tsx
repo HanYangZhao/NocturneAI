@@ -606,7 +606,7 @@ export default function TextVisualizer() {
               fontFamily: 'Lexend-Medium, Arial, sans-serif'
             }}
           >
-            Waiting for conversation...
+            Nocturne AI is listening...
           </p>
         )}
       </div>
