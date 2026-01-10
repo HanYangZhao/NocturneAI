@@ -79,7 +79,7 @@ const connection = Scribe.connect({
 
 connection.on(RealtimeEvents.SESSION_STARTED, () => {
 
-  console.log("Session started");
+  logger.info("Session started");
 
 });
 
@@ -87,7 +87,7 @@ connection.on(RealtimeEvents.SESSION_STARTED, () => {
 
 connection.on(RealtimeEvents.PARTIAL_TRANSCRIPT, (data) => {
 
-  console.log("Partial:", data.text);
+  logger.debug("Partial:", data.text);
 
 });
 
@@ -95,7 +95,7 @@ connection.on(RealtimeEvents.PARTIAL_TRANSCRIPT, (data) => {
 
 connection.on(RealtimeEvents.COMMITTED_TRANSCRIPT, (data) => {
 
-  console.log("Committed:", data.text);
+  logger.debug("Committed:", data.text);
 
 });
 

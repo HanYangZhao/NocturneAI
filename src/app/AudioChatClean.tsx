@@ -16,10 +16,11 @@
   import TriangleMixer from "./TriangleMixer";
   import PanControl, { DEFAULT_PAN_PRESETS, type PanPreset } from "./PanControl";
   import { useTranscript } from "./TranscriptContext";
+  import { TransientAnalyzer } from "./transientAnalyzer";
 
 export default function AudioChatClean() {
       // Transcript context for visualizer
-      const { addUserText, addAssistantText, setActiveEffects, textDisplaySpeed, setTextDisplaySpeed } = useTranscript();
+      const { addUserText, addAssistantText, setActiveEffects, textDisplaySpeed, setTextDisplaySpeed, setParticleBrightness } = useTranscript();
       
       // Stop TTS audio playback
       function stopTTSPlayback() {
@@ -52,7 +53,9 @@ export default function AudioChatClean() {
             logger.warn('[TTS] Failed to stop mixer channels', e);
           }
         }
-          try { isPlayingTTSRef.current = false; } catch (e) {}
+        // Stop brightness analysis
+        stopBrightnessAnalysis();
+        try { isPlayingTTSRef.current = false; } catch (e) {}
         logger.info('[TTS] Audio playback stopped by user');
         unmuteMic();
       }
@@ -83,6 +86,11 @@ export default function AudioChatClean() {
   const audioMixerRef = useRef<AudioMixer | null>(null);
   const [voiceChannels, setVoiceChannels] = useState<VoiceChannel[]>([]);
   const [voices] = useState(voicesConfig.voices);
+
+  // Transient analyzer for particle brightness
+  const transientAnalyzerRef = useRef<TransientAnalyzer | null>(null);
+  const brightnessIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const brightnessRunningRef = useRef<boolean>(false);
 
   // Pan presets
   const [panPresets, setPanPresets] = useState<PanPreset[]>(() => {
@@ -201,6 +209,77 @@ export default function AudioChatClean() {
     }
     setMicMuted(!unmuted);
   }
+
+  // Start the brightness analysis loop - analyzes audio after effects and mixer
+  function startBrightnessAnalysis() {
+    if (!audioContextRef.current || !outDestinationRef.current) {
+      console.warn('[Brightness] Cannot start - missing audioContext or destination');
+      return;
+    }
+
+    // Don't start if already running - check both ref and boolean flag
+    if (brightnessRunningRef.current) {
+      return;
+    }
+
+    // Always recreate the analyzer connection to ensure it's connected to current audio flow
+    // The destination stream may have changed since last time
+    if (transientAnalyzerRef.current) {
+      try { transientAnalyzerRef.current.disconnect(); } catch (e) {}
+    }
+    transientAnalyzerRef.current = new TransientAnalyzer(audioContextRef.current);
+    // Connect to the destination's stream to analyze the final output
+    const dest = outDestinationRef.current;
+    const mediaStreamSource = audioContextRef.current.createMediaStreamSource(dest.stream);
+    transientAnalyzerRef.current.connect(mediaStreamSource);
+    logger.debug('[Brightness] Transient analyzer connected to output stream');
+
+    // Mark as running BEFORE starting the loop
+    brightnessRunningRef.current = true;
+    let frameCount = 0;
+    let lastLogTime = Date.now();
+
+    // Use setInterval instead of requestAnimationFrame so updates continue when tab is backgrounded
+    // This is important for cross-window communication when visualizer is in a separate window
+    const updateBrightness = () => {
+      if (!brightnessRunningRef.current) {
+        return;
+      }
+      
+      if (transientAnalyzerRef.current && setParticleBrightness) {
+        const brightness = transientAnalyzerRef.current.getBrightness();
+        setParticleBrightness(brightness);
+        
+        // Log every 500ms to show values
+        frameCount++;
+        const now = Date.now();
+        if (now - lastLogTime > 500) {
+          logger.debug(`[Brightness] Frame ${frameCount}: brightness=${brightness.toFixed(3)}`);
+          lastLogTime = now;
+        }
+      }
+    };
+
+    // Start the loop at ~60fps (16ms interval)
+    logger.debug('[Brightness] Starting brightness analysis loop');
+    brightnessIntervalRef.current = setInterval(updateBrightness, 16);
+  }
+
+  // Stop the brightness analysis loop
+  function stopBrightnessAnalysis() {
+    if (!brightnessRunningRef.current) {
+      return; // Already stopped
+    }
+    logger.debug('[Brightness] Stopping brightness analysis loop');
+    brightnessRunningRef.current = false;
+    if (brightnessIntervalRef.current !== null) {
+      clearInterval(brightnessIntervalRef.current);
+      brightnessIntervalRef.current = null;
+    }
+    // Reset brightness to 0 when not playing
+    setParticleBrightness(0);
+  }
+
   // Play TTS audio for assistant response - supports multiple concurrent voices
   async function playAssistantTTS(text: string) {
     logger.info('[TTS] playAssistantTTS called with text:', text);
@@ -237,11 +316,17 @@ export default function AudioChatClean() {
         // Connect through effects chain
         AudioFX.asyncConnectChain(masterGain as unknown as AudioNode, dest as unknown as AudioNode);
         logger.debug('[TTS] Effects chain connected to mixer output');
+        
+        // Start brightness analysis after effects chain is connected
+        startBrightnessAnalysis();
       } catch (e) {
         logger.warn('[TTS] Failed to connect effects chain, using direct connection', e);
         const masterGain = audioMixerRef.current.getMasterGain();
         try { masterGain.disconnect(); } catch (e) {}
         masterGain.connect(dest);
+        
+        // Start brightness analysis even with direct connection
+        startBrightnessAnalysis();
       }
       
       // Get all enabled voices
@@ -306,6 +391,7 @@ export default function AudioChatClean() {
             logger.debug('[TTS]', voice.name, 'playback ended. Active:', activeCount);
             if (activeCount === 0) {
               logger.debug('[TTS] All voices finished, unmuting mic');
+              stopBrightnessAnalysis();
               try { isPlayingTTSRef.current = false; } catch (e) {}
               unmuteMic();
             }
@@ -317,6 +403,7 @@ export default function AudioChatClean() {
           logger.error('[TTS] Error playing voice', voice.name, err);
           activeCount--;
           if (activeCount === 0) {
+            stopBrightnessAnalysis();
             try { isPlayingTTSRef.current = false; } catch (e) {}
             unmuteMic();
           }
@@ -325,6 +412,9 @@ export default function AudioChatClean() {
       
       // Wait for all voices to be initiated (but not necessarily finished playing)
       await Promise.allSettled(voicePlaybackPromises);
+      
+      // Start brightness analysis after voices are playing
+      startBrightnessAnalysis();
       
       // Update voice channels state for UI
       if (audioMixerRef.current) {
@@ -344,6 +434,7 @@ export default function AudioChatClean() {
       
     } catch (err) {
       logger.error('[TTS] Multi-voice playback error', err);
+      stopBrightnessAnalysis();
       try { isPlayingTTSRef.current = false; } catch (e) {}
       unmuteMic();
     }

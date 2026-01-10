@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
+import logger from "./logger";
 
 export interface TranscriptMessage {
   role: 'user' | 'assistant';
@@ -21,6 +22,8 @@ interface TranscriptContextType {
   waveformData: Float32Array | null;
   textDisplaySpeed: number; // milliseconds per word (default 400)
   setTextDisplaySpeed: (speed: number) => void;
+  particleBrightness: number; // 0-1, brightness of main particles based on audio transients
+  setParticleBrightness: (brightness: number) => void;
 }
 
 const TranscriptContext = createContext<TranscriptContextType | undefined>(undefined);
@@ -32,6 +35,7 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
   const [activeEffects, setActiveEffects] = useState<Array<{ id: string; type: string; params: any }>>([]);
   const [waveformData, setWaveformData] = useState<Float32Array | null>(null);
   const [textDisplaySpeed, setTextDisplaySpeed] = useState(400); // ms per word
+  const [particleBrightness, setParticleBrightness] = useState(0); // 0-1 based on audio transients
   const [lastUserUpdate, setLastUserUpdate] = useState(0);
   const [lastAssistantUpdate, setLastAssistantUpdate] = useState(0);
   const lastUserMessageRef = useRef<TranscriptMessage | null>(null);
@@ -44,10 +48,16 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
 
     const channel = new BroadcastChannel('nocturne-visualizer');
     channelRef.current = channel;
+    logger.info('[TranscriptContext] BroadcastChannel initialized');
 
     // Listen for messages from other tabs
     channel.onmessage = (event) => {
       const { type, data } = event.data;
+      
+      // Debug: log all incoming messages
+      if (type === 'PARTICLE_BRIGHTNESS' && data > 0.01) {
+        logger.info(`[TranscriptContext] Received message type=${type} data=${data}`);
+      }
 
       switch (type) {
         case 'USER_TEXT': {
@@ -90,6 +100,12 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
         case 'TEXT_DISPLAY_SPEED':
           if (typeof data === 'number') {
             setTextDisplaySpeed(data);
+          }
+          break;
+        case 'PARTICLE_BRIGHTNESS':
+          if (typeof data === 'number') {
+            // Only log significant changes to reduce spam
+            setParticleBrightness(Math.max(0, Math.min(1, data)));
           }
           break;
         case 'CLEAR_MESSAGES':
@@ -207,6 +223,17 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
     });
   };
 
+  const setParticleBrightnessWithBroadcast = (brightness: number) => {
+    const clamped = Math.max(0, Math.min(1, brightness));
+    setParticleBrightness(clamped);
+    
+    // Broadcast to other tabs
+    channelRef.current?.postMessage({
+      type: 'PARTICLE_BRIGHTNESS',
+      data: clamped,
+    });
+  };
+
   return (
     <TranscriptContext.Provider
       value={{
@@ -221,6 +248,8 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
         waveformData,
         textDisplaySpeed,
         setTextDisplaySpeed: setTextDisplaySpeedWithBroadcast,
+        particleBrightness,
+        setParticleBrightness: setParticleBrightnessWithBroadcast,
       }}
     >
       {children}
