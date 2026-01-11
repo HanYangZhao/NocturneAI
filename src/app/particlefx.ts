@@ -168,11 +168,19 @@ export function getParticleEffectState(): ParticleEffectState {
         break;
 
       case 'RingModulator':
-        state.radial = {
-          depth: effect.params?.depth ?? 0.8,
-          rate: effect.params?.frequency ?? 30, // RingModulator uses 'frequency', not 'rate'
-        };
+      {
+        // RingModulator can be visually intense; scale down defaults and clamp values
+        const paramDepth = effect.params?.depth ?? 0.8;
+        const paramRate = effect.params?.frequency ?? 30; // RingModulator uses 'frequency', not 'rate'
+
+        // Reduce default depth to 40% of provided/default to make modulation gentler
+        const depth = Math.max(0, Math.min(1, paramDepth * 0.4));
+        // Clamp rate to a sensible maximum to avoid very rapid flashing (limit to 10Hz)
+        const rate = Math.max(0.1, Math.min(10, paramRate));
+
+        state.radial = { depth, rate };
         break;
+      }
     }
   }
 
