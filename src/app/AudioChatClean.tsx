@@ -81,6 +81,8 @@ export default function AudioChatClean() {
   const defaultChainRef = useRef<string[] | null>(null);
   const paramRanges = useParamRanges();
   const [showMidiController, setShowMidiController] = useState(false);
+  const [particleFxConnected, setParticleFxConnected] = useState(true); // Track if particle FX is connected to audio FX
+  const previousEffectsRef = useRef<Array<{ id: string; type: string; params: any; bypass?: boolean }>>([]);
   
   // Audio mixer for multiple voice playback
   const audioMixerRef = useRef<AudioMixer | null>(null);
@@ -89,8 +91,10 @@ export default function AudioChatClean() {
 
   // Transient analyzer for particle brightness
   const transientAnalyzerRef = useRef<TransientAnalyzer | null>(null);
+  const outputAnalyzerRef = useRef<TransientAnalyzer | null>(null);
   const brightnessIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const brightnessRunningRef = useRef<boolean>(false);
+  const postEffectsGainRef = useRef<GainNode | null>(null);
 
   // Pan presets
   const [panPresets, setPanPresets] = useState<PanPreset[]>(() => {
@@ -222,17 +226,33 @@ export default function AudioChatClean() {
       return;
     }
 
-    // Always recreate the analyzer connection to ensure it's connected to current audio flow
-    // The destination stream may have changed since last time
+    // Create two analyzers: one for input (live speech) and one for output (delay echoes)
     if (transientAnalyzerRef.current) {
       try { transientAnalyzerRef.current.disconnect(); } catch (e) {}
     }
     transientAnalyzerRef.current = new TransientAnalyzer(audioContextRef.current);
-    // Connect to the destination's stream to analyze the final output
-    const dest = outDestinationRef.current;
-    const mediaStreamSource = audioContextRef.current.createMediaStreamSource(dest.stream);
-    transientAnalyzerRef.current.connect(mediaStreamSource);
-    logger.debug('[Brightness] Transient analyzer connected to output stream');
+    
+    // Analyzer 1: Connect to master gain (detects live speech input)
+    const masterGain = audioMixerRef.current?.getMasterGain();
+    if (masterGain && transientAnalyzerRef.current) {
+      transientAnalyzerRef.current.connect(masterGain);
+      logger.debug('[Brightness] Input analyzer connected to master gain');
+    } else {
+      logger.warn('[Brightness] Failed to connect input analyzer');
+    }
+
+    // Analyzer 2: Connect to post-effects gain (detects delay echoes and all output)
+    if (outputAnalyzerRef.current) {
+      try { outputAnalyzerRef.current.disconnect(); } catch (e) {}
+    }
+    outputAnalyzerRef.current = new TransientAnalyzer(audioContextRef.current);
+    if (postEffectsGainRef.current && outputAnalyzerRef.current) {
+      outputAnalyzerRef.current.connect(postEffectsGainRef.current);
+      logger.debug('[Brightness] Output analyzer connected to post-effects gain');
+      logger.debug('[Brightness] PostEffectsGain exists:', !!postEffectsGainRef.current, 'gain value:', postEffectsGainRef.current?.gain.value);
+    } else {
+      logger.warn('[Brightness] Failed to connect output analyzer - postEffectsGain:', !!postEffectsGainRef.current);
+    }
 
     // Mark as running BEFORE starting the loop
     brightnessRunningRef.current = true;
@@ -246,22 +266,35 @@ export default function AudioChatClean() {
         return;
       }
       
-      if (transientAnalyzerRef.current && setParticleBrightness) {
-        const brightness = transientAnalyzerRef.current.getBrightness();
+      // Get brightness from both analyzers and use the max (combines live speech + delay echoes)
+      let brightness = 0;
+      let inputBrightness = 0;
+      let outputBrightness = 0;
+      
+      if (transientAnalyzerRef.current) {
+        inputBrightness = transientAnalyzerRef.current.getBrightness();
+        brightness = Math.max(brightness, inputBrightness);
+      }
+      if (outputAnalyzerRef.current) {
+        outputBrightness = outputAnalyzerRef.current.getBrightness();
+        brightness = Math.max(brightness, outputBrightness);
+      }
+      
+      if (setParticleBrightness) {
         setParticleBrightness(brightness);
         
-        // Log every 500ms to show values
+        // Log every 500ms to show values from both analyzers
         frameCount++;
         const now = Date.now();
         if (now - lastLogTime > 500) {
-          logger.debug(`[Brightness] Frame ${frameCount}: brightness=${brightness.toFixed(3)}`);
+          logger.debug(`[Brightness] Frame ${frameCount}: input=${inputBrightness.toFixed(3)} output=${outputBrightness.toFixed(3)} final=${brightness.toFixed(3)}`);
           lastLogTime = now;
         }
       }
     };
 
     // Start the loop at ~60fps (16ms interval)
-    logger.debug('[Brightness] Starting brightness analysis loop');
+    logger.debug('[Brightness] Starting brightness analysis loop with dual analyzers');
     brightnessIntervalRef.current = setInterval(updateBrightness, 16);
   }
 
@@ -313,9 +346,18 @@ export default function AudioChatClean() {
         const masterGain = audioMixerRef.current.getMasterGain();
         // Disconnect any previous connection
         try { masterGain.disconnect(); } catch (e) {}
-        // Connect through effects chain
-        AudioFX.asyncConnectChain(masterGain as unknown as AudioNode, dest as unknown as AudioNode);
-        logger.debug('[TTS] Effects chain connected to mixer output');
+        
+        // Ensure post-effects gain node exists
+        if (!postEffectsGainRef.current) {
+          postEffectsGainRef.current = ac.createGain();
+          postEffectsGainRef.current.gain.value = 1;
+          postEffectsGainRef.current.connect(dest);
+          logger.debug('[TTS] Post-effects gain node created');
+        }
+        
+        // Connect through effects chain to post-effects gain (so analyzers can read it)
+        AudioFX.asyncConnectChain(masterGain as unknown as AudioNode, postEffectsGainRef.current as unknown as AudioNode);
+        logger.debug('[TTS] Effects chain connected through post-effects gain node');
         
         // Start brightness analysis after effects chain is connected
         startBrightnessAnalysis();
@@ -323,7 +365,15 @@ export default function AudioChatClean() {
         logger.warn('[TTS] Failed to connect effects chain, using direct connection', e);
         const masterGain = audioMixerRef.current.getMasterGain();
         try { masterGain.disconnect(); } catch (e) {}
-        masterGain.connect(dest);
+        
+        // Ensure post-effects gain node exists even for fallback
+        if (!postEffectsGainRef.current) {
+          postEffectsGainRef.current = ac.createGain();
+          postEffectsGainRef.current.gain.value = 1;
+          postEffectsGainRef.current.connect(dest);
+        }
+        
+        masterGain.connect(postEffectsGainRef.current);
         
         // Start brightness analysis even with direct connection
         startBrightnessAnalysis();
@@ -390,10 +440,37 @@ export default function AudioChatClean() {
             activeCount--;
             logger.debug('[TTS]', voice.name, 'playback ended. Active:', activeCount);
             if (activeCount === 0) {
-              logger.debug('[TTS] All voices finished, unmuting mic');
-              stopBrightnessAnalysis();
-              try { isPlayingTTSRef.current = false; } catch (e) {}
-              unmuteMic();
+              logger.debug('[TTS] All voices finished, waiting for delay echoes to fade before stopping brightness');
+              // Don't stop brightness immediately - wait for delay echoes to finish
+              // Check brightness every 100ms and stop when it's been low for 500ms
+              let lowBrightnessCount = 0;
+              const fadeCheckInterval = setInterval(() => {
+                const currentBrightness = Math.max(
+                  transientAnalyzerRef.current?.getBrightness() || 0,
+                  outputAnalyzerRef.current?.getBrightness() || 0
+                );
+                
+                if (currentBrightness < 0.1) {
+                  lowBrightnessCount++;
+                  if (lowBrightnessCount >= 5) { // 500ms of low brightness
+                    clearInterval(fadeCheckInterval);
+                    stopBrightnessAnalysis();
+                    logger.debug('[TTS] Delay echoes faded, brightness analysis stopped');
+                    try { isPlayingTTSRef.current = false; } catch (e) {}
+                    unmuteMic();
+                  }
+                } else {
+                  lowBrightnessCount = 0; // Reset if brightness spikes again
+                }
+              }, 100);
+              
+              // Failsafe: force stop after 10 seconds
+              setTimeout(() => {
+                clearInterval(fadeCheckInterval);
+                stopBrightnessAnalysis();
+                try { isPlayingTTSRef.current = false; } catch (e) {}
+                unmuteMic();
+              }, 10000);
             }
           });
           
@@ -461,6 +538,7 @@ export default function AudioChatClean() {
         }
         const initialEffects = initial.map((it) => ({ id: it.id, type: it.type, params: AudioFX.getEffects().find((e:any)=>e.id===it.id)?.params ?? {}, bypass: true }));
         setEffectsList(initialEffects);
+        setActiveEffects(initialEffects); // Sync initial effects to visualizer
         const ids = initial.map((it) => it.id);
         setChainList(ids);
         defaultChainRef.current = ids.slice();
@@ -495,7 +573,7 @@ export default function AudioChatClean() {
     function handler(ev: any) {
       try {
         const ef = AudioFX.getEffects() || [];
-        const next = ef.map((e: any) => ({ id: e.id, type: e.type, params: e.params || {}, bypass: !!(e.params && e.params.bypass) }));
+        const next = ef.map((e: any) => ({ id: e.id, type: e.type, params: e.params || {}, bypass: !!e.bypass }));
         setEffectsList(next);
         setActiveEffects(next); // Sync effects to visualizer context
       } catch (e) {
@@ -540,6 +618,9 @@ export default function AudioChatClean() {
     setElStatus('connecting');
     setOaiStatus('connecting');
     try {
+      // Ensure audio graph routing is set up (creates post-effects gain node for analyzers)
+      ensureGraphRouting();
+      
       // Get local mic stream for mute/unmute control
       if (!localStreamRef.current) {
         try {
@@ -889,22 +970,30 @@ export default function AudioChatClean() {
       outDestinationRef.current = ac.createMediaStreamDestination();
     }
     
+    // Create post-effects gain node for analyzer connection (if not exists)
+    if (!postEffectsGainRef.current) {
+      postEffectsGainRef.current = ac.createGain();
+      postEffectsGainRef.current.gain.value = 1; // Pass-through
+      postEffectsGainRef.current.connect(outDestinationRef.current);
+      logger.debug('[AudioGraph] Post-effects gain node created for analyzer');
+    }
+    
     // Initialize audio mixer early so pan controls work before any audio plays
     if (!audioMixerRef.current) {
       audioMixerRef.current = new AudioMixer(ac, outDestinationRef.current);
       logger.debug('[AudioMixer] Initialized early for pan controls');
       
-      // Connect mixer master output through effects chain to destination
+      // Connect mixer master output through effects chain to post-effects gain (not directly to destination)
       try {
         AudioFX.initTuna(ac);
         const masterGain = audioMixerRef.current.getMasterGain();
-        AudioFX.asyncConnectChain(masterGain as unknown as AudioNode, outDestinationRef.current as unknown as AudioNode);
-        logger.debug('[AudioMixer] Effects chain connected to mixer output');
+        AudioFX.asyncConnectChain(masterGain as unknown as AudioNode, postEffectsGainRef.current as unknown as AudioNode);
+        logger.debug('[AudioMixer] Effects chain connected through post-effects gain node');
       } catch (e) {
         logger.warn('[AudioMixer] Failed to connect effects chain, using direct connection', e);
         const masterGain = audioMixerRef.current.getMasterGain();
         try { masterGain.disconnect(); } catch (e) {}
-        masterGain.connect(outDestinationRef.current);
+        masterGain.connect(postEffectsGainRef.current);
       }
     }
     
@@ -1290,6 +1379,7 @@ export default function AudioChatClean() {
                     const setTo = !allBypassed;
                     const next = effectsList.map((f) => ({ ...f, bypass: setTo }));
                     setEffectsList(next);
+                    setActiveEffects(next); // Sync to visualizer
                     // apply to audiofx
                     for (const f of next) {
                       try { AudioFX.updateEffectParams(f.id, { bypass: setTo }); } catch (e) {}
@@ -1298,6 +1388,67 @@ export default function AudioChatClean() {
                   className="text-xs px-2 py-1 border rounded"
                 >
                   {effectsList.length > 0 && effectsList.every((f) => !!f.bypass) ? 'Enable All' : 'Bypass All'}
+                </button>
+                {/** Particle FX Connect/Disconnect Toggle */}
+                <button
+                  onClick={() => {
+                    if (particleFxConnected) {
+                      // Disconnecting: save current state and bypass all
+                      previousEffectsRef.current = effectsList;
+                      const next = effectsList.map((f) => ({ ...f, bypass: true }));
+                      setEffectsList(next);
+                      setActiveEffects(next);
+                      for (const f of next) {
+                        try { AudioFX.updateEffectParams(f.id, { bypass: true }); } catch (e) {}
+                      }
+                    } else {
+                      // Connecting: restore previous state
+                      const next = previousEffectsRef.current.length > 0 ? previousEffectsRef.current : effectsList;
+                      setEffectsList(next);
+                      setActiveEffects(next);
+                      for (const f of next) {
+                        try { AudioFX.updateEffectParams(f.id, { bypass: f.bypass }); } catch (e) {}
+                      }
+                    }
+                    setParticleFxConnected(!particleFxConnected);
+                  }}
+                  className={`text-xs px-2 py-1 border rounded font-semibold ${
+                    particleFxConnected 
+                      ? 'bg-blue-100 hover:bg-blue-200 border-blue-400' 
+                      : 'bg-gray-100 hover:bg-gray-200 border-gray-400'
+                  }`}
+                >
+                  {particleFxConnected ? 'Disconnect Particle FX' : 'Connect Particle FX'}
+                </button>
+                {/** Reset Particle FX to original state */}
+                <button
+                  onClick={() => {
+                    // Reset both particle FX and audio effects to default state
+                    // Disable all audio effects
+                    const resetEffects = effectsList.map((f) => ({ ...f, bypass: true }));
+                    setEffectsList(resetEffects);
+                    setActiveEffects(resetEffects);
+                    
+                    // Clear all audio effect parameters in the system
+                    for (const f of resetEffects) {
+                      try { 
+                        AudioFX.updateEffectParams(f.id, { bypass: true }); 
+                      } catch (e) {}
+                    }
+                    
+                    // Clear particle FX cache to reset visual effects
+                    try {
+                      const ParticleFX = require('./particlefx');
+                      if (ParticleFX?.clearCachedEffects) {
+                        ParticleFX.clearCachedEffects();
+                      }
+                    } catch (e) {}
+                    
+                    logger.info('[AudioChat] All effects reset to default state');
+                  }}
+                  className="text-xs px-2 py-1 border rounded bg-yellow-100 hover:bg-yellow-200"
+                >
+                  Reset All FX
                 </button>
                 {/** Export / Import buttons */}
                 <button
@@ -1396,7 +1547,7 @@ export default function AudioChatClean() {
                     <div className="font-medium">{fx.type}</div>
                     <div className="flex items-center gap-2">
                       <label className="text-[11px]">Bypass</label>
-                      <input type="checkbox" checked={!!fx.bypass} onChange={(e)=>{ const v=e.target.checked; const nextEffects = effectsList.map(x=> x.id===fx.id?{...x,bypass:v}:x); setEffectsList(nextEffects); AudioFX.updateEffectParams(fx.id, { bypass: v }); }} />
+                      <input type="checkbox" checked={!!fx.bypass} onChange={(e)=>{ const v=e.target.checked; const nextEffects = effectsList.map(x=> x.id===fx.id?{...x,bypass:v}:x); setEffectsList(nextEffects); if (particleFxConnected) setActiveEffects(nextEffects); AudioFX.updateEffectParams(fx.id, { bypass: v }); }} />
                     </div>
                   </div>
                   <div className="mt-2 grid grid-cols-2 gap-2">
@@ -1412,7 +1563,7 @@ export default function AudioChatClean() {
                           <div key={k} className="flex flex-col text-xs">
                             <label className="mb-1">{k}</label>
                             <input type="range" min={range.min} max={range.max} step={range.step || 0.01} value={v}
-                              onChange={(e)=>{ const nv = Number(e.target.value); const nextEffects = effectsList.map(x=> x.id===fx.id?{...x, params: {...x.params, [k]: nv}}:x); setEffectsList(nextEffects); AudioFX.updateEffectParams(fx.id, { [k]: nv }); }} />
+                              onChange={(e)=>{ const nv = Number(e.target.value); const nextEffects = effectsList.map(x=> x.id===fx.id?{...x, params: {...x.params, [k]: nv}}:x); setEffectsList(nextEffects); if (particleFxConnected) setActiveEffects(nextEffects); AudioFX.updateEffectParams(fx.id, { [k]: nv }); }} />
                             <div className="text-right text-[11px] text-gray-600">{formatNumericValue(v)}</div>
                           </div>
                         );
@@ -1423,7 +1574,7 @@ export default function AudioChatClean() {
                         return (
                           <div key={k} className="flex flex-col text-xs">
                             <label className="mb-1">{k}</label>
-                            <select className="p-1 text-xs border" value={v} onChange={(e) => { const nv = e.target.value; const nextEffects = effectsList.map(x=> x.id===fx.id?{...x, params: {...x.params, [k]: nv}}:x); setEffectsList(nextEffects); AudioFX.updateEffectParams(fx.id, { [k]: nv }); }}>
+                            <select className="p-1 text-xs border" value={v} onChange={(e) => { const nv = e.target.value; const nextEffects = effectsList.map(x=> x.id===fx.id?{...x, params: {...x.params, [k]: nv}}:x); setEffectsList(nextEffects); if (particleFxConnected) setActiveEffects(nextEffects); AudioFX.updateEffectParams(fx.id, { [k]: nv }); }}>
                               {FILTER_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
                             </select>
                           </div>
@@ -1443,7 +1594,7 @@ export default function AudioChatClean() {
                         return (
                           <div key={k} className="flex flex-col text-xs col-span-2">
                             <label className="mb-1">{k}</label>
-                            <select className="p-1 text-xs border" value={v.replace('/LexiconHalls/', '')} onChange={(e) => { const nv = "/LexiconHalls/" + e.target.value; const nextEffects = effectsList.map(x=> x.id===fx.id?{...x, params: {...x.params, [k]: nv}}:x); setEffectsList(nextEffects); AudioFX.updateEffectParams(fx.id, { [k]: nv }); }}>
+                            <select className="p-1 text-xs border" value={v.replace('/LexiconHalls/', '')} onChange={(e) => { const nv = "/LexiconHalls/" + e.target.value; const nextEffects = effectsList.map(x=> x.id===fx.id?{...x, params: {...x.params, [k]: nv}}:x); setEffectsList(nextEffects); if (particleFxConnected) setActiveEffects(nextEffects); AudioFX.updateEffectParams(fx.id, { [k]: nv }); }}>
                               {impulses.map(o => <option key={o} value={o}>{o}</option>)}
                             </select>
                           </div>

@@ -17,8 +17,8 @@ interface TranscriptContextType {
   addUserText: (text: string, partial?: boolean) => void;
   addAssistantText: (text: string, partial?: boolean) => void;
   clearMessages: () => void;
-  activeEffects: Array<{ id: string; type: string; params: any }>;
-  setActiveEffects: (effects: Array<{ id: string; type: string; params: any }>) => void;
+  activeEffects: Array<{ id: string; type: string; params: any; bypass?: boolean }>;
+  setActiveEffects: (effects: Array<{ id: string; type: string; params: any; bypass?: boolean }>) => void;
   waveformData: Float32Array | null;
   textDisplaySpeed: number; // milliseconds per word (default 400)
   setTextDisplaySpeed: (speed: number) => void;
@@ -32,7 +32,7 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [currentUserText, setCurrentUserText] = useState('');
   const [currentAssistantText, setCurrentAssistantText] = useState('');
-  const [activeEffects, setActiveEffects] = useState<Array<{ id: string; type: string; params: any }>>([]);
+  const [activeEffects, setActiveEffects] = useState<Array<{ id: string; type: string; params: any; bypass?: boolean }>>([]);
   const [waveformData, setWaveformData] = useState<Float32Array | null>(null);
   const [textDisplaySpeed, setTextDisplaySpeed] = useState(400); // ms per word
   const [particleBrightness, setParticleBrightness] = useState(0); // 0-1 based on audio transients
@@ -48,7 +48,7 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
 
     const channel = new BroadcastChannel('nocturne-visualizer');
     channelRef.current = channel;
-    logger.info('[TranscriptContext] BroadcastChannel initialized');
+    logger.debug('[TranscriptContext] BroadcastChannel initialized');
 
     // Listen for messages from other tabs
     channel.onmessage = (event) => {
@@ -56,7 +56,7 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
       
       // Debug: log all incoming messages
       if (type === 'PARTICLE_BRIGHTNESS' && data > 0.01) {
-        logger.info(`[TranscriptContext] Received message type=${type} data=${data}`);
+        logger.debug(`[TranscriptContext] Received message type=${type} data=${data}`);
       }
 
       switch (type) {
@@ -90,6 +90,7 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
           break;
         }
         case 'ACTIVE_EFFECTS':
+          logger.debug('[TranscriptContext] Received ACTIVE_EFFECTS:', data);
           setActiveEffects(data);
           break;
         case 'WAVEFORM_DATA':
@@ -203,7 +204,8 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
     channelRef.current?.postMessage({ type: 'CLEAR_MESSAGES' });
   };
 
-  const setActiveEffectsWithBroadcast = (effects: Array<{ id: string; type: string; params: any }>) => {
+  const setActiveEffectsWithBroadcast = (effects: Array<{ id: string; type: string; params: any; bypass?: boolean }>) => {
+    logger.debug('[TranscriptContext] Broadcasting ACTIVE_EFFECTS:', effects);
     setActiveEffects(effects);
     
     // Broadcast to other tabs

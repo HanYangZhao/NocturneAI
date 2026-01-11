@@ -3,23 +3,33 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useTranscript } from './TranscriptContext';
 import * as THREE from 'three';
-
+import * as ParticleFX from './particlefx';
+import logger from './logger';
 export default function TextVisualizer() {
-  const { currentUserText, currentAssistantText, waveformData, textDisplaySpeed, particleBrightness } = useTranscript();
+  const { currentUserText, currentAssistantText, waveformData, textDisplaySpeed, particleBrightness, activeEffects } = useTranscript();
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const particlesRef = useRef<THREE.Points | null>(null);
   const particleOriginalColorsRef = useRef<Float32Array | null>(null);
+  const delayedParticlesRef = useRef<THREE.Points[]>([]);
+  const chorusParticlesRef = useRef<THREE.Points[]>([]);
   const animationFrameRef = useRef<number | null>(null);
   const particleBrightnessRef = useRef<number>(0);
   const smoothedBrightnessRef = useRef<number>(0); // Smoothed value for rendering
+  const lastLoggedEffectsRef = useRef<string>(''); // Track last logged effects to avoid spam
   const [displayedText, setDisplayedText] = useState('');
   const [currentWindowIndex, setCurrentWindowIndex] = useState(0);
   const textStartTimeRef = useRef<number | null>(null);
   const lastFullTextRef = useRef<string>('');
   const textMeshesRef = useRef<THREE.Mesh[]>([]);
+
+  // Update particle effects cache when activeEffects changes
+  useEffect(() => {
+    ParticleFX.updateCachedEffects(activeEffects);
+    logger.debug('[ParticleFX] Updated cached effects from context:', activeEffects);
+  }, [activeEffects]);
 
   // Listen directly to BroadcastChannel for brightness updates (for cross-tab communication)
   // Also sync from context's particleBrightness for same-tab usage
@@ -111,6 +121,8 @@ export default function TextVisualizer() {
 
   useEffect(() => {
     if (!containerRef.current) return;
+
+    logger.info('[ParticleFX] TextVisualizer mounted - Particle effects system initialized');
 
     // Scene setup
     const scene = new THREE.Scene();
@@ -229,9 +241,9 @@ export default function TextVisualizer() {
       (smokeParticle as any).baseRadius = radius;
       (smokeParticle as any).heightRatio = heightRatio;
       // Faster spin at top (like a tornado), slower at bottom
-      (smokeParticle as any).orbitSpeed = 0.8 + heightRatio * 1.5 + Math.random() * 0.4;
+      (smokeParticle as any).orbitSpeed = (0.8 + heightRatio * 1.5 + Math.random() * 0.4) * 0.5;
       // Upward velocity increases toward center
-      (smokeParticle as any).riseSpeed = 0.4 + (1 - radius / vortexBaseRadius) * 0.8 + Math.random() * 0.3;
+      (smokeParticle as any).riseSpeed = (0.4 + (1 - radius / vortexBaseRadius) * 0.8 + Math.random() * 0.3) * 0.5;
       (smokeParticle as any).rotationSpeed = 0.01 + Math.random() * 0.015;
       (smokeParticle as any).turbulencePhase = Math.random() * Math.PI * 2;
       (smokeParticle as any).baseOpacity = 0.25 + Math.random() * 0.15;
@@ -315,9 +327,43 @@ export default function TextVisualizer() {
         particlesRef.current.rotation.y += 0.0005;
         particlesRef.current.rotation.x += 0.0003;
 
-        const positions = particlesRef.current.geometry.attributes.position.array as Float32Array;
-        const colors = particlesRef.current.geometry.attributes.color.array as Float32Array;
+        const positionArray = particlesRef.current.geometry.attributes.position.array as Float32Array;
+        const colorArray = particlesRef.current.geometry.attributes.color.array as Float32Array;
+        const particleCount = positionArray.length / 3;
         
+        // Create working copies for animation
+        const positions = new Float32Array(positionArray);
+        
+        // Start with original colors and apply brightness FIRST
+        let colors: Float32Array;
+        if (particleOriginalColorsRef.current) {
+          const originalColors = particleOriginalColorsRef.current;
+          colors = new Float32Array(originalColors.length);
+          
+          // Smooth the brightness
+          const targetBrightness = particleBrightnessRef.current;
+          const smoothingFactor = 0.15;
+          smoothedBrightnessRef.current += (targetBrightness - smoothedBrightnessRef.current) * smoothingFactor;
+          const currentBrightness = smoothedBrightnessRef.current;
+          const brightnessFactor = 0.4 + currentBrightness * 1.05;
+          
+          for (let i = 0; i < colors.length; i += 3) {
+            colors[i] = Math.min(1, originalColors[i] * brightnessFactor);
+            colors[i + 1] = Math.min(1, originalColors[i + 1] * brightnessFactor);
+            colors[i + 2] = Math.min(1, originalColors[i + 2] * brightnessFactor);
+          }
+          
+          // Update opacity and size based on brightness
+          const material = particlesRef.current.material as THREE.PointsMaterial;
+          const baseOpacity = 0.6;
+          const baseSize = 0.5;
+          material.opacity = baseOpacity + currentBrightness * 0.7;
+          material.size = baseSize + currentBrightness * 0.4;
+        } else {
+          colors = new Float32Array(colorArray);
+        }
+        
+        // Apply base animation
         for (let i = 0; i < positions.length; i += 3) {
           const audioInfluence = audioData && i / 3 < audioData.length 
             ? Math.abs(audioData[i / 3]) * 5 
@@ -329,37 +375,133 @@ export default function TextVisualizer() {
           if (positions[i + 1] > 100) positions[i + 1] = -100;
           if (positions[i + 1] < -100) positions[i + 1] = 100;
         }
+
+        // Apply particle effects based on audio effects
+        const effectsResult = ParticleFX.applyAllParticleEffects(
+          positions,
+          colors,
+          time,
+          particleCount
+        );
+
+        // Debug: Log if any effects are active
+        const activeEffects = ParticleFX.getParticleEffectState();
+        const effectKeys = Object.keys(activeEffects).sort().join(',');
+        if (effectKeys !== lastLoggedEffectsRef.current) {
+          if (effectKeys) {
+            logger.debug('[ParticleFX] ✓ Effects detected and ACTIVE:', effectKeys);
+          } else {
+            logger.debug('[ParticleFX] No effects currently active');
+          }
+          lastLoggedEffectsRef.current = effectKeys;
+        }
+
+        // Copy processed positions and colors back to the geometry
+        for (let i = 0; i < positionArray.length; i++) {
+          positionArray[i] = effectsResult.positions[i];
+          colorArray[i] = effectsResult.colors[i];
+        }
         
         particlesRef.current.geometry.attributes.position.needsUpdate = true;
+        particlesRef.current.geometry.attributes.color.needsUpdate = true;
+
+        // Update delayed particles if delay effect is active
+        if (effectsResult.delayedParticles && effectsResult.delayedParticles.length > 0) {
+          // Ensure we have enough particle meshes for delayed copies
+          while (delayedParticlesRef.current.length < effectsResult.delayedParticles.length) {
+            const delayGeometry = new THREE.BufferGeometry();
+            const delayMaterial = new THREE.PointsMaterial({
+              size: 0.5,
+              vertexColors: true,
+              transparent: true,
+              opacity: 0.4,
+              blending: THREE.AdditiveBlending,
+            });
+            const delayParticles = new THREE.Points(delayGeometry, delayMaterial);
+            sceneRef.current?.add(delayParticles);
+            delayedParticlesRef.current.push(delayParticles);
+          }
+
+          // Update each delayed particle mesh
+          effectsResult.delayedParticles.forEach((delayed, idx) => {
+            const delayMesh = delayedParticlesRef.current[idx];
+            delayMesh.visible = true; // Make sure it's visible when effect is active
+            if (delayMesh.geometry.attributes.position === undefined) {
+              delayMesh.geometry.setAttribute('position', new THREE.BufferAttribute(delayed.positions, 3));
+              delayMesh.geometry.setAttribute('color', new THREE.BufferAttribute(delayed.colors, 3));
+            } else {
+              const posAttr = delayMesh.geometry.attributes.position as THREE.BufferAttribute;
+              const colAttr = delayMesh.geometry.attributes.color as THREE.BufferAttribute;
+              if (posAttr.array.length === delayed.positions.length) {
+                for (let i = 0; i < delayed.positions.length; i++) {
+                  (posAttr.array as Float32Array)[i] = delayed.positions[i];
+                  (colAttr.array as Float32Array)[i] = delayed.colors[i];
+                }
+                posAttr.needsUpdate = true;
+                colAttr.needsUpdate = true;
+              }
+            }
+          });
+
+          // Hide extra delayed particles
+          for (let i = effectsResult.delayedParticles.length; i < delayedParticlesRef.current.length; i++) {
+            delayedParticlesRef.current[i].visible = false;
+          }
+        } else {
+          // Hide all delayed particles if no delay effect
+          delayedParticlesRef.current.forEach((p) => (p.visible = false));
+        }
+
+        // Update chorus particles if chorus effect is active
+        if (effectsResult.chorusParticles && effectsResult.chorusParticles.length > 0) {
+          // Ensure we have enough particle meshes for chorus copies
+          while (chorusParticlesRef.current.length < effectsResult.chorusParticles.length) {
+            const chorusGeometry = new THREE.BufferGeometry();
+            const chorusMaterial = new THREE.PointsMaterial({
+              size: 0.5,
+              vertexColors: true,
+              transparent: true,
+              opacity: 0.35,
+              blending: THREE.AdditiveBlending,
+            });
+            const chorusParticles = new THREE.Points(chorusGeometry, chorusMaterial);
+            sceneRef.current?.add(chorusParticles);
+            chorusParticlesRef.current.push(chorusParticles);
+          }
+
+          // Update each chorus particle mesh
+          effectsResult.chorusParticles.forEach((chorus, idx) => {
+            const chorusMesh = chorusParticlesRef.current[idx];
+            chorusMesh.visible = true; // Make sure it's visible when effect is active
+            if (chorusMesh.geometry.attributes.position === undefined) {
+              chorusMesh.geometry.setAttribute('position', new THREE.BufferAttribute(chorus.positions, 3));
+              chorusMesh.geometry.setAttribute('color', new THREE.BufferAttribute(chorus.colors, 3));
+            } else {
+              const posAttr = chorusMesh.geometry.attributes.position as THREE.BufferAttribute;
+              const colAttr = chorusMesh.geometry.attributes.color as THREE.BufferAttribute;
+              if (posAttr.array.length === chorus.positions.length) {
+                for (let i = 0; i < chorus.positions.length; i++) {
+                  (posAttr.array as Float32Array)[i] = chorus.positions[i];
+                  (colAttr.array as Float32Array)[i] = chorus.colors[i];
+                }
+                posAttr.needsUpdate = true;
+                colAttr.needsUpdate = true;
+              }
+            }
+          });
+
+          // Hide extra chorus particles
+          for (let i = effectsResult.chorusParticles.length; i < chorusParticlesRef.current.length; i++) {
+            chorusParticlesRef.current[i].visible = false;
+          }
+        } else {
+          // Hide all chorus particles if no chorus effect
+          chorusParticlesRef.current.forEach((p) => (p.visible = false));
+        }
 
         // Apply brightness to particle colors (use ref updated directly from BroadcastChannel)
         // Smooth the brightness to avoid jittery/glitchy appearance
-        const targetBrightness = particleBrightnessRef.current;
-        const smoothingFactor = 0.15; // Lower = smoother but slower response
-        smoothedBrightnessRef.current += (targetBrightness - smoothedBrightnessRef.current) * smoothingFactor;
-        const currentBrightness = smoothedBrightnessRef.current;
-        
-        if (particleOriginalColorsRef.current) {
-          const originalColors = particleOriginalColorsRef.current;
-          // Brightness effect: base 1.0 + up to 1.25x boost based on audio
-          const brightnessFactor = 0.4 + currentBrightness * 1.1;
-          
-          for (let i = 0; i < colors.length; i += 3) {
-            // Get original color and apply brightness amplification
-            colors[i] = Math.min(1, originalColors[i] * brightnessFactor);
-            colors[i + 1] = Math.min(1, originalColors[i + 1] * brightnessFactor);
-            colors[i + 2] = Math.min(1, originalColors[i + 2] * brightnessFactor);
-          }
-          
-          // Smoothly interpolate opacity and size based on brightness
-          const material = particlesRef.current.material as THREE.PointsMaterial;
-          const baseOpacity = 0.6;
-          const baseSize = 0.5;
-          material.opacity = baseOpacity + currentBrightness * 0.7;
-          material.size = baseSize + currentBrightness * 0.4;
-          
-          particlesRef.current.geometry.attributes.color.needsUpdate = true;
-        }
+        // (Brightness is now applied before particle effects - see above)
       }
 
       // Animate smoke particles as tornado/fire vortex with volumetric lighting
@@ -420,8 +562,8 @@ export default function TextVisualizer() {
           (smoke as any).orbitAngle = Math.random() * Math.PI * 2;
           (smoke as any).baseRadius = vortexBaseRadius * (0.4 + Math.random() * 0.6);
           // Randomize speeds slightly on respawn for variation
-          (smoke as any).orbitSpeed = 0.8 + Math.random() * 1.5;
-          (smoke as any).riseSpeed = 0.5 + Math.random() * 0.9;
+          (smoke as any).orbitSpeed = (0.8 + Math.random() * 1.5) * 0.5;
+          (smoke as any).riseSpeed = (0.5 + Math.random() * 0.9) * 0.5;
         }
         
         // Calculate lighting from bottom-right light source
@@ -508,6 +650,24 @@ export default function TextVisualizer() {
         cancelAnimationFrame(animationFrameRef.current);
       }
       
+      // Dispose of delayed particles
+      delayedParticlesRef.current.forEach((particles) => {
+        particles.geometry.dispose();
+        if (particles.material instanceof THREE.Material) {
+          particles.material.dispose();
+        }
+      });
+      delayedParticlesRef.current = [];
+
+      // Dispose of chorus particles
+      chorusParticlesRef.current.forEach((particles) => {
+        particles.geometry.dispose();
+        if (particles.material instanceof THREE.Material) {
+          particles.material.dispose();
+        }
+      });
+      chorusParticlesRef.current = [];
+      
       if (rendererRef.current && containerRef.current) {
         containerRef.current.removeChild(rendererRef.current.domElement);
         rendererRef.current.dispose();
@@ -550,14 +710,14 @@ export default function TextVisualizer() {
         @keyframes smokeGlow {
           0%, 100% {
             text-shadow: 
-              0 0 10px rgba(100, 200, 255, 0.4),
-              0 0 20px rgba(100, 200, 255, 0.2);
+              0 0 5px rgba(100, 200, 255, 0.2),
+              0 0 10px rgba(100, 200, 255, 0.1);
           }
           50% {
             text-shadow: 
-              0 0 15px rgba(100, 200, 255, 0.6),
-              0 0 30px rgba(100, 200, 255, 0.4),
-              0 0 40px rgba(100, 200, 255, 0.2);
+              0 0 8px rgba(100, 200, 255, 0.3),
+              0 0 15px rgba(100, 200, 255, 0.2),
+              0 0 20px rgba(100, 200, 255, 0.1);
           }
         }
       `}</style>
