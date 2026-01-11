@@ -20,7 +20,7 @@
 
 export default function AudioChatClean() {
       // Transcript context for visualizer
-      const { addUserText, addAssistantText, setActiveEffects, textDisplaySpeed, setTextDisplaySpeed, setParticleBrightness, resetParticles, setIsAudioPlaying } = useTranscript();
+      const { addUserText, addAssistantText, setActiveEffects, textDisplaySpeed, setTextDisplaySpeed, setParticleBrightness, resetParticles, setIsAudioPlaying, clearMessages } = useTranscript();
       
       // Stop TTS audio playback
       function stopTTSPlayback() {
@@ -314,6 +314,8 @@ export default function AudioChatClean() {
     }
     // Reset brightness to 0 when not playing
     setParticleBrightness(0);
+    // Clear the visualizer text back to default "Nocturne AI"
+    clearMessages();
     // Signal that audio has stopped
     try { setIsAudioPlaying(false); } catch (e) {}
   }
