@@ -20,7 +20,7 @@
 
 export default function AudioChatClean() {
       // Transcript context for visualizer
-      const { addUserText, addAssistantText, setActiveEffects, textDisplaySpeed, setTextDisplaySpeed, setParticleBrightness } = useTranscript();
+      const { addUserText, addAssistantText, setActiveEffects, textDisplaySpeed, setTextDisplaySpeed, setParticleBrightness, resetParticles, setIsAudioPlaying } = useTranscript();
       
       // Stop TTS audio playback
       function stopTTSPlayback() {
@@ -226,6 +226,9 @@ export default function AudioChatClean() {
       return;
     }
 
+    // Signal that audio is now playing
+    try { setIsAudioPlaying(true); } catch (e) {}
+
     // Create two analyzers: one for input (live speech) and one for output (delay echoes)
     if (transientAnalyzerRef.current) {
       try { transientAnalyzerRef.current.disconnect(); } catch (e) {}
@@ -311,6 +314,8 @@ export default function AudioChatClean() {
     }
     // Reset brightness to 0 when not playing
     setParticleBrightness(0);
+    // Signal that audio has stopped
+    try { setIsAudioPlaying(false); } catch (e) {}
   }
 
   // Play TTS audio for assistant response - supports multiple concurrent voices
@@ -441,8 +446,24 @@ export default function AudioChatClean() {
             logger.debug('[TTS]', voice.name, 'playback ended. Active:', activeCount);
             if (activeCount === 0) {
               logger.debug('[TTS] All voices finished, waiting for delay echoes to fade before stopping brightness');
+              
+              // Calculate timeout based on delay effect - if delay is active, wait longer
+              let maxWaitTime = 10000; // Default 10 seconds
+              const delayEffect = effectsList.find(f => f.type === 'Delay' && !f.bypass);
+              if (delayEffect && delayEffect.params?.delayTime) {
+                // Wait for at least delay time + feedback decay time
+                // feedback creates repeats, so add extra time for them to decay
+                const delayTime = delayEffect.params.delayTime || 100;
+                const feedback = delayEffect.params.feedback || 0.45;
+                // Calculate decay time: with feedback 0.45, need ~5 repeats to become inaudible
+                // Each repeat takes delayTime, so total is roughly 5 * delayTime
+                const decayTime = Math.ceil(5 * delayTime);
+                maxWaitTime = Math.max(10000, decayTime + 2000); // At least 10 seconds, or delay decay + 2s buffer
+                logger.debug('[TTS] Extended wait time for long delay:', maxWaitTime, 'ms (delayTime:', delayTime, 'feedback:', feedback, ')');
+              }
+              
               // Don't stop brightness immediately - wait for delay echoes to finish
-              // Check brightness every 100ms and stop when it's been low for 500ms
+              // Check brightness every 100ms and stop when it's been low for 1000ms (increased from 500ms)
               let lowBrightnessCount = 0;
               const fadeCheckInterval = setInterval(() => {
                 const currentBrightness = Math.max(
@@ -450,9 +471,9 @@ export default function AudioChatClean() {
                   outputAnalyzerRef.current?.getBrightness() || 0
                 );
                 
-                if (currentBrightness < 0.1) {
+                if (currentBrightness < 0.05) {
                   lowBrightnessCount++;
-                  if (lowBrightnessCount >= 5) { // 500ms of low brightness
+                  if (lowBrightnessCount >= 20) { // 2000ms of low brightness (was 500ms)
                     clearInterval(fadeCheckInterval);
                     stopBrightnessAnalysis();
                     logger.debug('[TTS] Delay echoes faded, brightness analysis stopped');
@@ -464,13 +485,14 @@ export default function AudioChatClean() {
                 }
               }, 100);
               
-              // Failsafe: force stop after 10 seconds
+              // Failsafe: force stop after calculated timeout
               setTimeout(() => {
                 clearInterval(fadeCheckInterval);
                 stopBrightnessAnalysis();
+                logger.debug('[TTS] Brightness analysis stopped by failsafe timeout');
                 try { isPlayingTTSRef.current = false; } catch (e) {}
                 unmuteMic();
-              }, 10000);
+              }, maxWaitTime);
             }
           });
           
@@ -1443,6 +1465,13 @@ export default function AudioChatClean() {
                         ParticleFX.clearCachedEffects();
                       }
                     } catch (e) {}
+                    
+                    // Reset particle positions to original layout
+                    try {
+                      resetParticles();
+                    } catch (e) {
+                      logger.warn('[AudioChat] Failed to reset particle positions:', e);
+                    }
                     
                     logger.info('[AudioChat] All effects reset to default state');
                   }}

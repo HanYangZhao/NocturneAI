@@ -23,7 +23,7 @@ export function useParamRanges(): Record<string, { min: number; max: number; ste
   return {
     // Delay params
     feedback: { min: 0, max: 1, step: 0.0079 },
-    delayTime: { min: 1, max: 3000, step: 23.6 },
+    delayTime: { min: 1, max: 2000, step: 18 },
     wetLevel: { min: 0, max: 2, step: 0.0157 },
     dryLevel: { min: 0, max: 2, step: 0.0157 },
     cutoff: { min: 20, max: 5000, step: 40 },

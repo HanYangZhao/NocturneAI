@@ -199,8 +199,8 @@ export function applyDelayToParticles(
   const delayedPositions: Float32Array[] = [];
   const delayedColors: Float32Array[] = [];
 
-  // Create multiple delayed copies - limit to max 4 to prevent accumulation
-  const numDelayedCopies = Math.min(8, Math.max(1, Math.floor(delay.feedback * 8)));
+  // Create multiple delayed copies - limit to max 16 to prevent accumulation
+  const numDelayedCopies = Math.min(16, Math.max(1, Math.floor(delay.feedback * 16)));
   
   for (let d = 1; d <= numDelayedCopies; d++) {
     // Calculate fade more conservatively
@@ -597,10 +597,10 @@ export function applyAllParticleEffects(
     currentPositions = applyPhaserToParticles(currentPositions, effectState.phaser, time, particleCount);
   }
 
-  // Apply filter
-  if (effectState.filter) {
-    currentPositions = applyFilterToParticles(currentPositions, effectState.filter, time, particleCount);
-  }
+//   // Apply filter
+//   if (effectState.filter) {
+//     currentPositions = applyFilterToParticles(currentPositions, effectState.filter, time, particleCount);
+//   }
 
   // Apply tremolo
   if (effectState.tremolo) {

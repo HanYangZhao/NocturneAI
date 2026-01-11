@@ -6,19 +6,21 @@ import * as THREE from 'three';
 import * as ParticleFX from './particlefx';
 import logger from './logger';
 export default function TextVisualizer() {
-  const { currentUserText, currentAssistantText, waveformData, textDisplaySpeed, particleBrightness, activeEffects } = useTranscript();
+  const { currentUserText, currentAssistantText, waveformData, textDisplaySpeed, particleBrightness, activeEffects, resetParticles, isAudioPlaying } = useTranscript();
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const particlesRef = useRef<THREE.Points | null>(null);
   const particleOriginalColorsRef = useRef<Float32Array | null>(null);
+  const particleOriginalPositionsRef = useRef<Float32Array | null>(null);
   const delayedParticlesRef = useRef<THREE.Points[]>([]);
   const chorusParticlesRef = useRef<THREE.Points[]>([]);
   const animationFrameRef = useRef<number | null>(null);
   const particleBrightnessRef = useRef<number>(0);
   const smoothedBrightnessRef = useRef<number>(0); // Smoothed value for rendering
   const lastLoggedEffectsRef = useRef<string>(''); // Track last logged effects to avoid spam
+  const isAudioPlayingRef = useRef<boolean>(false);
   const [displayedText, setDisplayedText] = useState('');
   const [currentWindowIndex, setCurrentWindowIndex] = useState(0);
   const textStartTimeRef = useRef<number | null>(null);
@@ -43,6 +45,37 @@ export default function TextVisualizer() {
       if (type === 'PARTICLE_BRIGHTNESS' && typeof data === 'number') {
         // Update ref directly - no React state involved
         particleBrightnessRef.current = data;
+      } else if (type === 'AUDIO_PLAYING' && typeof data === 'boolean') {
+        isAudioPlayingRef.current = data;
+        // When audio stops, reset particles to idle state
+        if (!data) {
+          logger.debug('[TextVisualizer] Audio stopped, resetting particles to idle state');
+          if (particlesRef.current && particleOriginalPositionsRef.current) {
+            const posAttr = particlesRef.current.geometry.attributes.position as THREE.BufferAttribute;
+            const posArray = posAttr.array as Float32Array;
+            
+            // Restore original positions
+            for (let i = 0; i < particleOriginalPositionsRef.current.length; i++) {
+              posArray[i] = particleOriginalPositionsRef.current[i];
+            }
+            posAttr.needsUpdate = true;
+            logger.info('[TextVisualizer] Particles reset to idle state');
+          }
+        }
+      } else if (type === 'RESET_PARTICLES') {
+        // Reset particles to original positions
+        logger.debug('[TextVisualizer] Received RESET_PARTICLES signal from BroadcastChannel');
+        if (particlesRef.current && particleOriginalPositionsRef.current) {
+          const posAttr = particlesRef.current.geometry.attributes.position as THREE.BufferAttribute;
+          const posArray = posAttr.array as Float32Array;
+          
+          // Restore original positions
+          for (let i = 0; i < particleOriginalPositionsRef.current.length; i++) {
+            posArray[i] = particleOriginalPositionsRef.current[i];
+          }
+          posAttr.needsUpdate = true;
+          logger.info('[TextVisualizer] Particle positions reset to original layout');
+        }
       }
     };
     
@@ -55,6 +88,26 @@ export default function TextVisualizer() {
   useEffect(() => {
     particleBrightnessRef.current = particleBrightness;
   }, [particleBrightness]);
+
+  // Sync audio playing state from context
+  useEffect(() => {
+    isAudioPlayingRef.current = isAudioPlaying;
+    // When audio stops, reset particles to idle state
+    if (!isAudioPlaying) {
+      logger.debug('[TextVisualizer] Audio stopped, resetting particles to idle state');
+      if (particlesRef.current && particleOriginalPositionsRef.current) {
+        const posAttr = particlesRef.current.geometry.attributes.position as THREE.BufferAttribute;
+        const posArray = posAttr.array as Float32Array;
+        
+        // Restore original positions
+        for (let i = 0; i < particleOriginalPositionsRef.current.length; i++) {
+          posArray[i] = particleOriginalPositionsRef.current[i];
+        }
+        posAttr.needsUpdate = true;
+        logger.info('[TextVisualizer] Particles reset to idle state');
+      }
+    }
+  }, [isAudioPlaying]);
 
   // Prefer showing the latest user partial; fall back to assistant output.
   const fullText = currentUserText || currentAssistantText;
@@ -171,8 +224,9 @@ export default function TextVisualizer() {
     particlesGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     particlesGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
-    // Store original colors for brightness adjustment (only once)
+    // Store original colors AND positions for brightness adjustment and reset (only once)
     particleOriginalColorsRef.current = new Float32Array(colors);
+    particleOriginalPositionsRef.current = new Float32Array(positions);
 
     const particlesMaterial = new THREE.PointsMaterial({
       size: 0.5,
@@ -345,7 +399,7 @@ export default function TextVisualizer() {
           const smoothingFactor = 0.15;
           smoothedBrightnessRef.current += (targetBrightness - smoothedBrightnessRef.current) * smoothingFactor;
           const currentBrightness = smoothedBrightnessRef.current;
-          const brightnessFactor = 0.4 + currentBrightness * 1.05;
+          const brightnessFactor = 0.2 + currentBrightness * 1.05;
           
           for (let i = 0; i < colors.length; i += 3) {
             colors[i] = Math.min(1, originalColors[i] * brightnessFactor);
@@ -376,13 +430,24 @@ export default function TextVisualizer() {
           if (positions[i + 1] < -100) positions[i + 1] = 100;
         }
 
-        // Apply particle effects based on audio effects
-        const effectsResult = ParticleFX.applyAllParticleEffects(
-          positions,
-          colors,
-          time,
-          particleCount
-        );
+        // Apply particle effects based on audio effects (only when audio is playing)
+        let effectsResult: any;
+        if (isAudioPlayingRef.current) {
+          effectsResult = ParticleFX.applyAllParticleEffects(
+            positions,
+            colors,
+            time,
+            particleCount
+          );
+        } else {
+          // When audio is not playing, use unmodified positions and colors
+          effectsResult = {
+            positions: new Float32Array(positions),
+            colors: new Float32Array(colors),
+            delayedParticles: [],
+            chorusParticles: []
+          };
+        }
 
         // Debug: Log if any effects are active
         const activeEffects = ParticleFX.getParticleEffectState();
@@ -423,7 +488,7 @@ export default function TextVisualizer() {
           }
 
           // Update each delayed particle mesh
-          effectsResult.delayedParticles.forEach((delayed, idx) => {
+          effectsResult.delayedParticles.forEach((delayed: any, idx: number) => {
             const delayMesh = delayedParticlesRef.current[idx];
             delayMesh.visible = true; // Make sure it's visible when effect is active
             if (delayMesh.geometry.attributes.position === undefined) {
@@ -470,7 +535,7 @@ export default function TextVisualizer() {
           }
 
           // Update each chorus particle mesh
-          effectsResult.chorusParticles.forEach((chorus, idx) => {
+          effectsResult.chorusParticles.forEach((chorus: any, idx: number) => {
             const chorusMesh = chorusParticlesRef.current[idx];
             chorusMesh.visible = true; // Make sure it's visible when effect is active
             if (chorusMesh.geometry.attributes.position === undefined) {

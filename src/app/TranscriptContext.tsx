@@ -24,6 +24,9 @@ interface TranscriptContextType {
   setTextDisplaySpeed: (speed: number) => void;
   particleBrightness: number; // 0-1, brightness of main particles based on audio transients
   setParticleBrightness: (brightness: number) => void;
+  resetParticles: () => void; // Trigger particle position reset
+  isAudioPlaying: boolean; // Track if audio (mic or output) is currently playing
+  setIsAudioPlaying: (playing: boolean) => void; // Set audio playing state
 }
 
 const TranscriptContext = createContext<TranscriptContextType | undefined>(undefined);
@@ -36,6 +39,8 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
   const [waveformData, setWaveformData] = useState<Float32Array | null>(null);
   const [textDisplaySpeed, setTextDisplaySpeed] = useState(400); // ms per word
   const [particleBrightness, setParticleBrightness] = useState(0); // 0-1 based on audio transients
+  const [resetParticlesFlag, setResetParticlesFlag] = useState(0); // Counter to trigger reset
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false); // Track if audio is currently playing
   const [lastUserUpdate, setLastUserUpdate] = useState(0);
   const [lastAssistantUpdate, setLastAssistantUpdate] = useState(0);
   const lastUserMessageRef = useRef<TranscriptMessage | null>(null);
@@ -107,6 +112,16 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
           if (typeof data === 'number') {
             // Only log significant changes to reduce spam
             setParticleBrightness(Math.max(0, Math.min(1, data)));
+          }
+          break;
+        case 'RESET_PARTICLES':
+          logger.debug('[TranscriptContext] Received RESET_PARTICLES signal');
+          setResetParticlesFlag(prev => prev + 1);
+          break;
+        case 'AUDIO_PLAYING':
+          if (typeof data === 'boolean') {
+            logger.debug('[TranscriptContext] Received AUDIO_PLAYING:', data);
+            setIsAudioPlaying(data);
           }
           break;
         case 'CLEAR_MESSAGES':
@@ -236,6 +251,27 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
     });
   };
 
+  const resetParticlesWithBroadcast = () => {
+    logger.debug('[TranscriptContext] Broadcasting RESET_PARTICLES signal');
+    setResetParticlesFlag(prev => prev + 1);
+    
+    // Broadcast to other tabs
+    channelRef.current?.postMessage({
+      type: 'RESET_PARTICLES',
+      data: true,
+    });
+  };
+
+  const setIsAudioPlayingWithBroadcast = (playing: boolean) => {
+    setIsAudioPlaying(playing);
+    
+    // Broadcast to other tabs
+    channelRef.current?.postMessage({
+      type: 'AUDIO_PLAYING',
+      data: playing,
+    });
+  };
+
   return (
     <TranscriptContext.Provider
       value={{
@@ -252,6 +288,9 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
         setTextDisplaySpeed: setTextDisplaySpeedWithBroadcast,
         particleBrightness,
         setParticleBrightness: setParticleBrightnessWithBroadcast,
+        resetParticles: resetParticlesWithBroadcast,
+        isAudioPlaying,
+        setIsAudioPlaying: setIsAudioPlayingWithBroadcast,
       }}
     >
       {children}
