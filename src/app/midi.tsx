@@ -5,6 +5,8 @@ import * as AudioFX from "./audiofx";
 import logger from "./logger";
 import * as ExportImport from "./exportImport";
 
+const midiCCScaler = 1.5
+
 // Utility to format numeric values for display
 export function formatNumericValue(n: unknown): string {
   if (typeof n !== 'number' || Number.isNaN(n)) return String(n);
@@ -18,59 +20,62 @@ export const EFFECT_TYPES = ['Delay', 'Phaser', 'Convolver', 'Compressor', 'Filt
 // Filter type options for Filter effect
 export const FILTER_TYPES = ['lowpass', 'highpass', 'bandpass', 'lowshelf', 'highshelf', 'peaking', 'notch', 'allpass'] as const;
 
+
 // Centralized param ranges for all effects
 export function useParamRanges(): Record<string, { min: number; max: number; step?: number }> {
   return {
     // Delay params
-    feedback: { min: 0, max: 1, step: 0.0079 },
-    delayTime: { min: 1, max: 2000, step: 18 },
-    wetLevel: { min: 0, max: 2, step: 0.0157 },
-    dryLevel: { min: 0, max: 2, step: 0.0157 },
-    cutoff: { min: 20, max: 5000, step: 40 },
+    feedback: { min: 0, max: 1, step: 0.0079 * midiCCScaler },
+    delayTime: { min: 1, max: 2000, step: 18 * midiCCScaler },
+    wetLevel: { min: 0, max: 2, step: 0.0157 * midiCCScaler },
+    dryLevel: { min: 0, max: 2, step: 0.0157 * midiCCScaler },
+    cutoff: { min: 20, max: 5000, step: 40 * midiCCScaler },
     // Phaser params
-    rate: { min: 0.01, max: 8, step: 0.063 },
-    depth: { min: 0, max: 1, step: 0.0079 },
-    stereoPhase: { min: 0, max: 180, step: 1.42 },
-    baseModulationFrequency: { min: 200, max: 1500, step: 10.2 },
+    rate: { min: 0.01, max: 8, step: 0.063 * midiCCScaler},
+    depth: { min: 0, max: 1, step: 0.0079 * midiCCScaler },
+    stereoPhase: { min: 0, max: 180, step: 1.42 * midiCCScaler },
+    baseModFreq: { min: 200, max: 1500, step: 10.2 * midiCCScaler },
     // Convolver params
-    highCut: { min: 20, max: 5000, step: 40 },
-    lowCut: { min: 20, max: 5000, step: 40 },
-    level: { min: 0, max: 1, step: 0.0079 },
+    highCut: { min: 20, max: 5000, step: 40 * midiCCScaler },
+    lowCut: { min: 20, max: 5000, step: 40 * midiCCScaler },
+    level: { min: 0, max: 1, step: 0.0079 * midiCCScaler },
     // Compressor params
-    threshold: { min: -100, max: 0, step: 0.79 },
-    makeupGain: { min: 0, max: 20, step: 0.157 },
-    attack: { min: 0, max: 1000, step: 7.87 },
-    release: { min: 0, max: 3000, step: 23.6 },
-    ratio: { min: 1, max: 20, step: 0.15 },
-    knee: { min: 0, max: 40, step: 0.315 },
-    automakeup: { min: 0, max: 1, step: 0.0079 },
+    threshold: { min: -100, max: 0, step: 0.79 * midiCCScaler },
+    makeupGain: { min: 0, max: 20, step: 0.157 * midiCCScaler },
+    attack: { min: 0, max: 1000, step: 7.87 * midiCCScaler },
+    release: { min: 0, max: 3000, step: 23.6 * midiCCScaler },
+    ratio: { min: 1, max: 20, step: 0.15 * midiCCScaler },
+    knee: { min: 0, max: 40, step: 0.315 * midiCCScaler },
+    automakeup: { min: 0, max: 1, step: 0.0079 * midiCCScaler },
     // Filter params
-    frequency: { min: 20, max: 2500, step: 20 },
-    Q: { min: 0.001, max: 100, step: 0.787 },
-    gain: { min: -40, max: 40, step: 0.63 },
+    frequency: { min: 20, max: 2500, step: 20 * midiCCScaler },
+    Q: { min: 0.001, max: 100, step: 0.787 * midiCCScaler },
+    gain: { min: -40, max: 40, step: 0.63 * midiCCScaler },
     // Tremolo params
-    intensity: { min: 0, max: 1, step: 0.0079 },
+    intensity: { min: 0, max: 1, step: 0.0079 * midiCCScaler },
     // Bitcrusher params
     bits: { min: 1, max: 16, step: 1 },
-    normfreq: { min: 0, max: 1, step: 0.0079 },
+    normfreq: { min: 0, max: 1, step: 0.0079 * midiCCScaler },
     bufferSize: { min: 256, max: 16384, step: 127 },
     // Chorus params
-    delay: { min: 0, max: 1, step: 0.0079 },
+    delay: { min: 0, max: 1, step: 0.0079 * midiCCScaler },
     // Overdrive params
-    outputGain: { min: -42, max: 0, step: 0.33 },
-    drive: { min: 0, max: 1, step: 0.0079 },
-    curveAmount: { min: 0, max: 1, step: 0.0079 },
+    outputGain: { min: -42, max: 0, step: 0.33 * midiCCScaler },
+    drive: { min: 0, max: 1, step: 0.0079 * midiCCScaler },
+    curveAmount: { min: 0, max: 1, step: 0.0079 * midiCCScaler },
     algorithmIndex: { min: 0, max: 5, step: 1 },
     // RingModulator params
     // frequency parameter uses shared 'frequency' key
     // depth parameter uses shared 'depth' key
     // Legacy/other
-    resonance: { min: 0, max: 4, step: 0.0315 },
+    resonance: { min: 0, max: 4, step: 0.0315 * midiCCScaler },
+    // Bypass parameter (binary: 0=off/false, 1=on/true)
+    bypass: { min: 0, max: 1, step: 1 },
   };
 }
 
 // Button action types that can be triggered by MIDI notes
-export type ButtonAction = 'stopAudio' | 'muteMic' | 'unmuteMic' | 'toggleMic';
+export type ButtonAction = 'stopAudio' | 'muteMic' | 'unmuteMic' | 'toggleMic' | 'resetAllFX';
 
 type MidiControllerProps = {
   paramLabels?: string[]; // optional labels for the 32 params
@@ -83,11 +88,12 @@ type MidiControllerProps = {
 const STORAGE_KEY = "nocturne_midi_mappings_v1";
 
 export default function MidiController({ paramLabels = [], onMidiCC, onButtonAction, onPanPreset, availablePanPresets = [] }: MidiControllerProps) {
-  const DEFAULT_COUNT = 48; // 36 params + 10 pan presets + 2 actions
+  const DEFAULT_COUNT = 49; // 36 params + 10 pan presets + 3 actions
   const initialLabels = Array.from({ length: DEFAULT_COUNT }, (_, i) => {
     if (i >= 36 && i <= 45) return `Pan Preset ${i - 35}`; // Slots 37-46
     if (i === 46) return 'Stop Audio';
     if (i === 47) return 'Toggle Mic Mute';
+    if (i === 48) return 'Reset All FX';
     return paramLabels[i] ?? `Param ${i + 1}`;
   });
 
@@ -138,6 +144,16 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
                 panPresetId: null
               };
             }
+            // Slot 49 (index 48) is Reset All FX
+            if (i === 48) {
+              return {
+                assignedCC: null,
+                assignedNote: typeof v.assignedNote === 'number' ? v.assignedNote : 72,
+                targets: [],
+                actionTarget: 'resetAllFX' as ButtonAction,
+                panPresetId: null
+              };
+            }
             // For other slots (1-36), load normally
             return {
               assignedCC: typeof v.assignedCC === 'number' ? v.assignedCC : null, 
@@ -164,6 +180,8 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
               loaded.push({ assignedCC: null, assignedNote: 70, targets: [], actionTarget: 'stopAudio' as ButtonAction, panPresetId: null });
             } else if (i === 47) {
               loaded.push({ assignedCC: null, assignedNote: 71, targets: [], actionTarget: 'toggleMic' as ButtonAction, panPresetId: null });
+            } else if (i === 48) {
+              loaded.push({ assignedCC: null, assignedNote: 72, targets: [], actionTarget: 'resetAllFX' as ButtonAction, panPresetId: null });
             } else {
               loaded.push({ assignedCC: null, assignedNote: null, targets: [], actionTarget: null, panPresetId: null });
             }
@@ -188,6 +206,8 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
       if (i === 46) return { assignedCC: null, assignedNote: 70, targets: [], actionTarget: 'stopAudio' as ButtonAction, panPresetId: null };
       // Slot 48 (index 47) is Toggle Mic
       if (i === 47) return { assignedCC: null, assignedNote: 71, targets: [], actionTarget: 'toggleMic' as ButtonAction, panPresetId: null };
+      // Slot 49 (index 48) is Reset All FX
+      if (i === 48) return { assignedCC: null, assignedNote: 72, targets: [], actionTarget: 'resetAllFX' as ButtonAction, panPresetId: null };
       return { assignedCC: null, assignedNote: null, targets: [], actionTarget: null, panPresetId: null };
     });
     return defaults;
@@ -270,8 +290,12 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
     const effects = AudioFX.getEffects();
     if (!effects || effects.length === 0) return;
     // build list of candidate targets: [{effectId,paramKey}]
+    // First, add bypass for each effect, then add numeric params
     const candidates: Array<{ effectId: string; paramKey: string }> = [];
     for (const eff of effects) {
+      // Add bypass first for each effect
+      candidates.push({ effectId: eff.id, paramKey: 'bypass' });
+      // Then add numeric params
       const keys = Object.keys(eff.params || {}).filter(k => typeof (eff.params || {})[k] === 'number');
       for (const k of keys) {
         candidates.push({ effectId: eff.id, paramKey: k });
@@ -332,10 +356,16 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
               if (!eff) continue;
               const paramName = t.paramKey;
               const range = paramRanges[paramName] || { min: 0, max: 1 };
-              let mapped = range.min + (val / 127) * (range.max - range.min);
+              let mapped = range.min + (val / 127) * (range.max - range.min) * midiCCScaler;
+              // Clamp to range
+              mapped = Math.max(range.min, Math.min(range.max, mapped));
               // Cast integer params to int
               if (paramName === 'bits' || paramName === 'algorithmIndex' || paramName === 'automakeup') {
                 mapped = Math.round(mapped);
+              }
+              // Cast bypass to boolean
+              if (paramName === 'bypass') {
+                mapped = mapped > 0.5 ? 1 : 0;
               }
               // call AudioFX.updateEffectParams
               try {
@@ -365,7 +395,13 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
       if (listeningRef.current !== null) {
         const idx = listeningRef.current as number;
         const next = mappingsRef.current.slice();
-        next[idx] = { ...next[idx], assignedCC: null, assignedNote: note };
+        const currentSlot = next[idx];
+        logger.debug('[MIDI] Learning note', note, 'for slot', idx, 'current targets:', currentSlot.targets);
+        // Preserve everything but update the note, clearing CC
+        // Ensure targets exist (should have bypass at minimum for notes)
+        const targets = currentSlot.targets && currentSlot.targets.length > 0 ? currentSlot.targets : [];
+        next[idx] = { ...currentSlot, assignedCC: null, assignedNote: note, targets };
+        logger.debug('[MIDI] After learn:', 'targets:', next[idx].targets, 'note:', next[idx].assignedNote);
         setMappings(next);
         listeningRef.current = null;
         logger.debug('[MIDI] Learned note', note, 'for slot', idx);
@@ -381,12 +417,55 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
       logger.debug('[MIDI] Checking', mappingsRef.current.length, 'mappings for note', note);
       // find mappings assigned to this note
       mappingsRef.current.forEach((slot, idx) => {
-        logger.debug('[MIDI] Slot', idx, 'assignedNote:', slot.assignedNote, 'actionTarget:', slot.actionTarget, 'panPresetId:', slot.panPresetId);
+        // logger.debug('[MIDI] Slot', idx, 'assignedNote:', slot.assignedNote, 'targets:', slot.targets?.length || 0, 'actionTarget:', slot.actionTarget, 'panPresetId:', slot.panPresetId);
         if (slot.assignedNote === note) {
           logger.debug('[MIDI] Match found! Slot', idx, 'has note', note);
           // visual flash
           setFlashSlots((s) => ({ ...s, [idx]: true }));
           setTimeout(() => setFlashSlots((s) => ({ ...s, [idx]: false })), 220);
+          
+          // If this slot has effect parameter targets, apply them (using velocity as MIDI value 0-127)
+          logger.debug('[MIDI] Slot targets:', slot.targets);
+          if (slot.targets && slot.targets.length > 0) {
+            logger.debug('[MIDI] Applying', slot.targets.length, 'targets with velocity', velocity);
+            for (const t of slot.targets) {
+              try {
+                const eff = AudioFX.getEffects().find((e: any) => e.id === t.effectId);
+                if (!eff) {
+                  logger.warn('[MIDI] Effect not found:', t.effectId);
+                  continue;
+                }
+                const paramName = t.paramKey;
+                let mapped: number;
+                
+                // Cast bypass to boolean - toggle on note press
+                if (paramName === 'bypass') {
+                  const currentBypass = eff.bypass ? 1 : 0;
+                  mapped = currentBypass ? 0 : 1; // toggle
+                  logger.debug('[MIDI] Bypass param - current:', currentBypass, '-> toggled to:', mapped);
+                } else {
+                  const range = paramRanges[paramName] || { min: 0, max: 1 };
+                  mapped = range.min + (velocity / 127) * (range.max - range.min);
+                  // Cast integer params to int
+                  if (paramName === 'bits' || paramName === 'algorithmIndex' || paramName === 'automakeup') {
+                    mapped = Math.round(mapped);
+                  }
+                }
+                // call AudioFX.updateEffectParams
+                try {
+                  logger.debug('[MIDI] Updating param', paramName, 'to', mapped, 'for effect', t.effectId);
+                  AudioFX.updateEffectParams(t.effectId, { [paramName]: mapped });
+                  logger.debug('[MIDI] Successfully updated', paramName);
+
+                  try {
+                    window.dispatchEvent(new CustomEvent('audiofx:paramsUpdated', { detail: { effectId: t.effectId, paramName, value: mapped } }));
+                  } catch (e) {}
+                } catch (e) {}
+              } catch (e) {
+                // ignore per-target errors
+              }
+            }
+          }
           
           // If this slot has an action target, trigger it
           const actionCallback = onButtonActionRef.current;
@@ -434,7 +513,8 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
     const effects = AudioFX.getEffects();
     if (!effects || effects.length === 0) return;
     const eff = effects[0];
-    const paramKey = Object.keys(eff.params || {}).find((k) => typeof (eff.params || {})[k] === 'number') || Object.keys(eff.params || {})[0] || '';
+    // Prefer bypass as the first option, then any numeric param
+    const paramKey = 'bypass';
     const next = mappings.slice();
     next[idx] = { ...next[idx], targets: [...next[idx].targets, { effectId: eff.id, paramKey }] };
     setMappings(next);
@@ -471,7 +551,7 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedInputId, midiAccess]);
 
-  // Cleanup stored mappings: remove targets that reference missing effects or non-numeric params
+  // Cleanup stored mappings: remove targets that reference missing effects or invalid params
   useEffect(() => {
     const effects = AudioFX.getEffects();
     if (!effects || effects.length === 0) return;
@@ -480,7 +560,9 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
       const targets = (slot.targets || []).filter((t) => {
         const eff = effects.find((e: any) => e.id === t.effectId);
         if (!eff) return false;
-        return typeof (eff.params || {})[t.paramKey] === 'number';
+        const paramValue = (eff.params || {})[t.paramKey];
+        // Allow numeric params and bypass (boolean)
+        return typeof paramValue === 'number' || t.paramKey === 'bypass';
       });
       if (targets.length !== (slot.targets || []).length) changed = true;
       return { ...slot, targets };
@@ -524,7 +606,7 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
                   <div className="flex-1">
                     <div className="text-sm font-semibold">{initialLabels[i]}</div>
                     <div className="mt-2 space-y-2">
-                      {/* Show CC field for effect params, Note field for actions and presets */}
+                      {/* Show CC/Note toggle only for bypass and for action/preset slots */}
                       {slot.actionTarget || slot.panPresetId ? (
                         <div className="flex items-center gap-2">
                           <label className="text-xs text-gray-600 w-10">Note</label>
@@ -533,15 +615,58 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
                             const next = mappings.slice(); next[i] = { ...next[i], assignedCC: null, assignedNote: v }; setMappings(next);
                           }} className="w-20 p-1 border text-xs" />
                         </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <label className="text-xs text-gray-600 w-10">CC</label>
-                          <input type="number" min={0} max={127} value={slot.assignedCC ?? ""} onChange={(e) => {
-                            const v = e.target.value === "" ? null : Math.max(0, Math.min(127, Number(e.target.value)));
-                            const next = mappings.slice(); next[i] = { ...next[i], assignedCC: v, assignedNote: null }; setMappings(next);
-                          }} className="w-20 p-1 border text-xs" />
-                        </div>
-                      )}
+                      ) : (() => {
+                        const hasBypassTarget = slot.targets && slot.targets.some((t) => t.paramKey === 'bypass');
+                        return hasBypassTarget ? (
+                          <div className="space-y-2">
+                            {/* For bypass param, show both CC and Note options */}
+                            <div className="flex items-center gap-2">
+                              <label className="text-xs text-gray-600">
+                                <input type="radio" checked={slot.assignedCC !== null || slot.assignedNote === null} onChange={() => {
+                                  const next = mappings.slice(); next[i] = { ...next[i], assignedNote: null }; setMappings(next);
+                                }} className="mr-1" />
+                                CC
+                              </label>
+                              <input type="number" min={0} max={127} value={slot.assignedCC ?? ""} onChange={(e) => {
+                                const v = e.target.value === "" ? null : Math.max(0, Math.min(127, Number(e.target.value)));
+                                const next = mappings.slice(); next[i] = { ...next[i], assignedCC: v, assignedNote: null }; setMappings(next);
+                              }} className="w-20 p-1 border text-xs" disabled={slot.assignedNote !== null} />
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <label className="text-xs text-gray-600">
+                                <input type="radio" checked={slot.assignedNote !== null} onChange={() => {
+                                  const next = mappings.slice();
+                                  // When switching to Note mode, ensure targets are set with bypass if not already present
+                                  const newTargets = slot.targets && slot.targets.length > 0 ? slot.targets : 
+                                    (slot.targets?.some(t => t.paramKey === 'bypass') ? slot.targets : 
+                                      [{ effectId: (AudioFX.getEffects()[0]?.id || ''), paramKey: 'bypass' }]);
+                                  next[i] = { ...next[i], assignedCC: null, targets: newTargets }; 
+                                  setMappings(next);
+                                }} className="mr-1" />
+                                Note
+                              </label>
+                              <input type="number" min={0} max={127} value={slot.assignedNote ?? ""} onChange={(e) => {
+                                const v = e.target.value === "" ? null : Math.max(0, Math.min(127, Number(e.target.value)));
+                                const next = mappings.slice(); 
+                                // Ensure targets exist when setting note value
+                                const newTargets = slot.targets && slot.targets.length > 0 ? slot.targets : 
+                                  (slot.targets?.some(t => t.paramKey === 'bypass') ? slot.targets : 
+                                    [{ effectId: (AudioFX.getEffects()[0]?.id || ''), paramKey: 'bypass' }]);
+                                next[i] = { ...next[i], assignedCC: null, assignedNote: v, targets: newTargets }; 
+                                setMappings(next);
+                              }} className="w-20 p-1 border text-xs" disabled={slot.assignedCC !== null} />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <label className="text-xs text-gray-600 w-10">CC</label>
+                            <input type="number" min={0} max={127} value={slot.assignedCC ?? ""} onChange={(e) => {
+                              const v = e.target.value === "" ? null : Math.max(0, Math.min(127, Number(e.target.value)));
+                              const next = mappings.slice(); next[i] = { ...next[i], assignedCC: v, assignedNote: null }; setMappings(next);
+                            }} className="w-20 p-1 border text-xs" />
+                          </div>
+                        );
+                      })()}
                       <div className="flex items-center gap-2">
                         <button onClick={() => startLearn(i)} className="px-2 py-1 border rounded text-xs">{listeningRef.current === i ? 'Listening…' : 'Learn'}</button>
                         <button onClick={() => clearMapping(i)} className="px-2 py-1 border rounded text-xs text-red-600">Clear</button>
@@ -589,7 +714,9 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
                                     const eff = AudioFX.getEffects().find((e: any) => e.id === t.effectId);
                                     if (!eff) return [<option key="-" value="">-</option>];
                                     const keys = Object.keys(eff.params || {}).filter(k => typeof (eff.params || {})[k] === 'number');
-                                    return keys.map((k) => <option key={k} value={k}>{k}</option>);
+                                    // Add bypass option if not already present (defensive check for uniqueness)
+                                    const allKeys = keys.includes('bypass') ? keys : ['bypass', ...keys];
+                                    return allKeys.map((k) => <option key={k} value={k}>{k}</option>);
                                   })()}
                                 </select>
                                 <button onClick={() => removeTarget(i, ti)} className="px-2 py-0.5 border rounded text-xs text-red-600">Remove</button>
@@ -623,7 +750,7 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
           })}
         </div>
       </div>
-      <div className="mt-2 text-xs text-gray-600">Tip: click Learn, then move a CC controller (for effect params) or press a MIDI note (for actions and pan presets). Params 1-36 use CC, Actions and Pan Presets use MIDI notes.</div>
+      <div className="mt-2 text-xs text-gray-600">Tip: click Learn, then move a CC controller or press a MIDI note. Effect bypass params can use CC or Notes, other params use CC only, Actions and Pan Presets use Notes.</div>
       <div className="mt-3 flex gap-2 flex-wrap">
         <button
           onClick={async () => {

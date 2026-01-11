@@ -26,6 +26,11 @@ export default function TextVisualizer() {
   const textStartTimeRef = useRef<number | null>(null);
   const lastFullTextRef = useRef<string>('');
   const textMeshesRef = useRef<THREE.Mesh[]>([]);
+  
+  // Sprite sheet animation state
+  const spriteCurrentFrameRef = useRef<number>(0);
+  const spriteFrameTimeRef = useRef<number>(0);
+  const spriteConfigRef = useRef({ horizontal: 8, vertical: 8, total: 64, duration: 50 });
 
   // Update particle effects cache when activeEffects changes
   useEffect(() => {
@@ -240,71 +245,60 @@ export default function TextVisualizer() {
     scene.add(particles);
     particlesRef.current = particles;
 
-    // Create volumetric tornado/fire vortex effect (side view of glass container)
+    // Create simple static smoke planes (like 2015-master)
     const smokeParticles: THREE.Mesh[] = [];
-    const smokeTexture = createSmokeTexture();
     
-    // Vortex container parameters
-    const vortexBaseRadius = 75;  // Radius at the bottom (wider)
-    const vortexTopRadius = 30;   // Radius at the top (tighter funnel)
-    const vortexHeight = 140;
-    const totalParticles = 65;
+    // Load actual sprite-smoke.png from 2015-master
+    const textureLoader = new THREE.TextureLoader();
+    const smokeTexture = textureLoader.load('/sprite-smoke.png');
+    smokeTexture.wrapS = smokeTexture.wrapT = THREE.RepeatWrapping;
+    const config = spriteConfigRef.current;
+    smokeTexture.repeat.set(1 / config.horizontal, 1 / config.vertical);
+    smokeTexture.offset.set(0, 1 - 1 / config.vertical);
     
-    // Light source position (bottom right)
-    const lightPos = new THREE.Vector3(60, -50, 30);
+    // Static smoke layer configuration (like 2015-master)
+    const smokeLayers = 5;
+    const resize = 1.25
+    const smokeData = [
+      { positionX: 10.7, positionY: 3.9, positionZ: 17.8, rotationZ: 2.7, scale: 3.9 * resize },
+      { positionX: -2.8, positionY: 2.6, positionZ: -11, rotationZ: 0.7, scale: 7.7 * resize },
+      { positionX: 13, positionY: 19.5, positionZ: -1.3, rotationZ: 2, scale: 2.7 * resize },
+      { positionX: -8, positionY: -5, positionZ: 8, rotationZ: 1.5, scale: 5 * resize },
+      { positionX: 5, positionY: -10, positionZ: -5, rotationZ: 3, scale: 4 * resize }
+    ];
     
-    for (let i = 0; i < totalParticles; i++) {
-      // Varied geometry sizes - larger for more volumetric look
-      const geoSize = 65 + Math.random() * 55;
-      const smokeGeometry = new THREE.PlaneGeometry(geoSize, geoSize);
+    const frontColor = new THREE.Color('#9d8ca3');
+    const backColor = new THREE.Color('#b87a88');
+    
+    for (let i = 0; i < smokeLayers; i++) {
+      const geometry = new THREE.PlaneGeometry(10, 10);
       
-      const smokeMaterial = new THREE.MeshBasicMaterial({
+      // Use predefined positions or random
+      const positionX = smokeData[i]?.positionX ?? (Math.random() - 0.5) * 40;
+      const positionY = smokeData[i]?.positionY ?? (Math.random() - 0.5) * 40;
+      const positionZ = smokeData[i]?.positionZ ?? (Math.random() - 0.5) * 40;
+      const rotationZ = smokeData[i]?.rotationZ ?? Math.random() * Math.PI;
+      const scale = smokeData[i]?.scale ?? 1 + Math.random() * 9;
+      
+      // Front layers use frontColor, back layers use backColor
+      const color = positionZ < 0 ? backColor : frontColor;
+      
+      const material = new THREE.MeshBasicMaterial({
         map: smokeTexture,
-        transparent: true,
-        opacity: 0.2 + Math.random() * 0.15,
         depthWrite: false,
-        blending: THREE.NormalBlending,
-        side: THREE.DoubleSide,
-        color: new THREE.Color(0.15, 0.15, 0.15), // Base dark gray
+        depthTest: true,
+        transparent: true,
+        opacity: 0.2,
+        color: color
       });
       
-      const smokeParticle = new THREE.Mesh(smokeGeometry, smokeMaterial);
+      const plane = new THREE.Mesh(geometry, material);
+      plane.position.set(positionX, positionY, positionZ);
+      plane.rotation.z = rotationZ;
+      plane.scale.set(scale, scale, 1);
       
-      // Distribute particles throughout the vortex height
-      const heightRatio = Math.random(); // 0 = bottom, 1 = top
-      const y = (heightRatio - 0.5) * vortexHeight;
-      
-      // Radius varies with height (tornado funnel shape)
-      const radiusAtHeight = vortexBaseRadius - (vortexBaseRadius - vortexTopRadius) * heightRatio;
-      const angle = Math.random() * Math.PI * 2;
-      const radius = radiusAtHeight * (0.4 + Math.random() * 0.6);
-      
-      const initialScale = 0.5 + Math.random() * 0.5;
-      smokeParticle.scale.set(initialScale, initialScale, initialScale);
-      
-      // Position in cylindrical coordinates, offset back for side view
-      smokeParticle.position.set(
-        Math.cos(angle) * radius,
-        y,
-        -70 + Math.sin(angle) * radius * 0.6  // Compress Z for side view
-      );
-      smokeParticle.rotation.z = Math.random() * Math.PI * 2;
-      
-      // Store properties for tornado vortex animation
-      (smokeParticle as any).orbitAngle = angle;
-      (smokeParticle as any).baseRadius = radius;
-      (smokeParticle as any).heightRatio = heightRatio;
-      // Faster spin at top (like a tornado), slower at bottom
-      (smokeParticle as any).orbitSpeed = (0.8 + heightRatio * 1.5 + Math.random() * 0.4) * 0.5;
-      // Upward velocity increases toward center
-      (smokeParticle as any).riseSpeed = (0.4 + (1 - radius / vortexBaseRadius) * 0.8 + Math.random() * 0.3) * 0.5;
-      (smokeParticle as any).rotationSpeed = 0.01 + Math.random() * 0.015;
-      (smokeParticle as any).turbulencePhase = Math.random() * Math.PI * 2;
-      (smokeParticle as any).baseOpacity = 0.25 + Math.random() * 0.15;
-      (smokeParticle as any).flickerPhase = Math.random() * Math.PI * 2;
-      
-      scene.add(smokeParticle);
-      smokeParticles.push(smokeParticle);
+      scene.add(plane);
+      smokeParticles.push(plane);
     }
 
     // Lighting
@@ -323,47 +317,112 @@ export default function TextVisualizer() {
     pointLight3.position.set(0, 20, -20);
     scene.add(pointLight3);
 
-    // Helper function to create smoke texture with soft edges for volumetric lighting
-    function createSmokeTexture() {
+    // Helper function to create animated smoke sprite sheet (8x8 grid = 64 frames)
+    function createSmokeSpriteSheet() {
+      const config = spriteConfigRef.current;
+      const cellSize = 256;
       const canvas = document.createElement('canvas');
-      canvas.width = 256;
-      canvas.height = 256;
+      canvas.width = cellSize * config.horizontal;
+      canvas.height = cellSize * config.vertical;
       const ctx = canvas.getContext('2d')!;
       
-      // Create very soft, cloud-like gradient for better lighting
-      const gradient = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
-      gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-      gradient.addColorStop(0.1, 'rgba(240, 240, 240, 0.9)');
-      gradient.addColorStop(0.25, 'rgba(200, 200, 200, 0.7)');
-      gradient.addColorStop(0.4, 'rgba(150, 150, 150, 0.5)');
-      gradient.addColorStop(0.6, 'rgba(100, 100, 100, 0.3)');
-      gradient.addColorStop(0.8, 'rgba(50, 50, 50, 0.1)');
-      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, 256, 256);
-      
-      // Add subtle noise for organic texture
-      const imageData = ctx.getImageData(0, 0, 256, 256);
-      const data = imageData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        const noise = (Math.random() - 0.5) * 15;
-        data[i] = Math.min(255, Math.max(0, data[i] + noise));     // R
-        data[i + 1] = Math.min(255, Math.max(0, data[i + 1] + noise)); // G
-        data[i + 2] = Math.min(255, Math.max(0, data[i + 2] + noise)); // B
+      // Generate 64 frames of animated smoke
+      for (let row = 0; row < config.vertical; row++) {
+        for (let col = 0; col < config.horizontal; col++) {
+          const frameIndex = row * config.horizontal + col;
+          if (frameIndex >= config.total) break;
+          
+          const x = col * cellSize;
+          const y = row * cellSize;
+          
+          // Each frame has slightly different smoke pattern
+          const frameOffset = frameIndex / config.total;
+          const turbulence = frameOffset * Math.PI * 2;
+          
+          // Organic, animated smoke gradient
+          const offsetX = Math.cos(turbulence * 1.7) * 30;
+          const offsetY = Math.sin(turbulence * 2.3) * 30;
+          const gradient = ctx.createRadialGradient(
+            x + cellSize/2 + offsetX,
+            y + cellSize/2 + offsetY,
+            0,
+            x + cellSize/2,
+            y + cellSize/2,
+            cellSize/2
+          );
+          
+          // Density varies per frame for animation effect
+          const density = 0.85 + Math.sin(frameOffset * Math.PI * 3) * 0.15;
+          gradient.addColorStop(0, `rgba(255, 255, 255, ${density})`);
+          gradient.addColorStop(0.1, `rgba(240, 240, 240, ${0.9 * density})`);
+          gradient.addColorStop(0.25, `rgba(200, 200, 200, ${0.7 * density})`);
+          gradient.addColorStop(0.4, `rgba(150, 150, 150, ${0.5 * density})`);
+          gradient.addColorStop(0.6, 'rgba(100, 100, 100, 0.3)');
+          gradient.addColorStop(0.8, 'rgba(50, 50, 50, 0.1)');
+          gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+          
+          ctx.fillStyle = gradient;
+          ctx.fillRect(x, y, cellSize, cellSize);
+          
+          // Add wispy noise variation per frame
+          const imageData = ctx.getImageData(x, y, cellSize, cellSize);
+          const data = imageData.data;
+          for (let i = 0; i < data.length; i += 4) {
+            const noise = (Math.random() - 0.5) * 15;
+            const wisp = Math.sin((i / 4 + frameOffset * 1000) * 0.1) * 8;
+            data[i] = Math.min(255, Math.max(0, data[i] + noise + wisp));
+            data[i + 1] = Math.min(255, Math.max(0, data[i + 1] + noise + wisp));
+            data[i + 2] = Math.min(255, Math.max(0, data[i + 2] + noise + wisp));
+          }
+          ctx.putImageData(imageData, x, y);
+        }
       }
-      ctx.putImageData(imageData, 0, 0);
       
       const texture = new THREE.CanvasTexture(canvas);
+      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      // Show only one sprite cell at a time
+      texture.repeat.set(1 / config.horizontal, 1 / config.vertical);
+      // Start at first frame (bottom-left in texture coordinates)
+      texture.offset.set(0, 1 - 1 / config.vertical);
       texture.needsUpdate = true;
       return texture;
     }
 
     // Animation loop
     let time = 0;
+    let lastFrameTime = Date.now();
     const animate = () => {
       animationFrameRef.current = requestAnimationFrame(animate);
       time += 0.01;
+      
+      // Update sprite sheet animation (UV offset)
+      const currentTime = Date.now();
+      const delta = currentTime - lastFrameTime;
+      lastFrameTime = currentTime;
+      
+      spriteFrameTimeRef.current += delta;
+      const config = spriteConfigRef.current;
+      
+      // Advance frame when duration elapsed
+      while (spriteFrameTimeRef.current > config.duration) {
+        spriteFrameTimeRef.current -= config.duration;
+        spriteCurrentFrameRef.current++;
+        
+        // Loop back to first frame
+        if (spriteCurrentFrameRef.current >= config.total) {
+          spriteCurrentFrameRef.current = 0;
+        }
+        
+        // Calculate UV offset for current frame
+        const frame = spriteCurrentFrameRef.current;
+        const row = Math.floor(frame / config.horizontal);
+        const col = frame % config.horizontal;
+        
+        // Update texture offset (flip Y for proper orientation)
+        smokeTexture.offset.x = col / config.horizontal;
+        smokeTexture.offset.y = 1 - (row + 1) / config.vertical;
+        smokeTexture.needsUpdate = true;
+      }
 
       // Get audio data
       const audioData = waveformData;
@@ -399,7 +458,7 @@ export default function TextVisualizer() {
           const smoothingFactor = 0.15;
           smoothedBrightnessRef.current += (targetBrightness - smoothedBrightnessRef.current) * smoothingFactor;
           const currentBrightness = smoothedBrightnessRef.current;
-          const brightnessFactor = 0.2 + currentBrightness * 1.05;
+          const brightnessFactor = 0.15 + currentBrightness * 1.01;
           
           for (let i = 0; i < colors.length; i += 3) {
             colors[i] = Math.min(1, originalColors[i] * brightnessFactor);
@@ -569,117 +628,8 @@ export default function TextVisualizer() {
         // (Brightness is now applied before particle effects - see above)
       }
 
-      // Animate smoke particles as tornado/fire vortex with volumetric lighting
-      smokeParticles.forEach((smoke, i) => {
-        const orbitSpeed = (smoke as any).orbitSpeed || 1.0;
-        const riseSpeed = (smoke as any).riseSpeed || 0.5;
-        const rotSpeed = (smoke as any).rotationSpeed || 0.01;
-        const turbPhase = (smoke as any).turbulencePhase || 0;
-        const baseOpacity = (smoke as any).baseOpacity || 0.3;
-        const flickerPhase = (smoke as any).flickerPhase || 0;
-        let heightRatio = (smoke as any).heightRatio || 0.5;
-        
-        // Update orbital angle - faster spin creates tornado effect
-        (smoke as any).orbitAngle += orbitSpeed * 0.02;
-        const angle = (smoke as any).orbitAngle;
-        
-        // Update height ratio as particle rises
-        heightRatio += riseSpeed * 0.003;
-        (smoke as any).heightRatio = heightRatio;
-        
-        // Calculate current Y position and radius based on height
-        const y = (heightRatio - 0.5) * vortexHeight;
-        
-        // Tornado funnel: tighter at top, wider at bottom
-        const radiusAtHeight = vortexBaseRadius - (vortexBaseRadius - vortexTopRadius) * Math.min(heightRatio, 1);
-        const baseRadius = (smoke as any).baseRadius;
-        const radiusRatio = baseRadius / vortexBaseRadius;
-        const currentRadius = radiusAtHeight * radiusRatio;
-        
-        // Highly turbulent fire-like motion - chaotic but mainly upward
-        const turbIntensity = 1 - heightRatio * 0.3; // More turbulence at bottom
-        const fireTurbX = (
-          Math.sin(time * 3.5 + turbPhase + i * 0.3) * 8 +
-          Math.sin(time * 5.2 + turbPhase * 2.1 + i * 0.7) * 5 +
-          Math.cos(time * 7.0 + i * 1.2) * 3
-        ) * turbIntensity;
-        const fireTurbY = (
-          Math.sin(time * 4.0 + turbPhase * 1.3) * 4 +
-          Math.cos(time * 6.5 + i * 0.9) * 2
-        ) * 0.5; // Less vertical turbulence to keep upward direction
-        const fireTurbZ = (
-          Math.cos(time * 3.0 + i * 0.5) * 6 +
-          Math.sin(time * 5.8 + turbPhase * 0.7) * 4 +
-          Math.cos(time * 8.0 + i * 1.5) * 2
-        ) * turbIntensity;
-        
-        // Swirling vortex position with enhanced turbulence
-        smoke.position.x = Math.cos(angle) * currentRadius + fireTurbX;
-        smoke.position.y = y + fireTurbY;
-        smoke.position.z = -70 + Math.sin(angle) * currentRadius * 0.6 + fireTurbZ;
-        
-        // More chaotic self-rotation for turbulent swirling texture
-        smoke.rotation.z += rotSpeed + Math.sin(time * 3.5 + i) * 0.01 + Math.cos(time * 5 + turbPhase) * 0.005;
-        
-        // Reset particle when it reaches the top - respawn at bottom
-        if (heightRatio > 1.1) {
-          (smoke as any).heightRatio = -0.1 + Math.random() * 0.1;
-          (smoke as any).orbitAngle = Math.random() * Math.PI * 2;
-          (smoke as any).baseRadius = vortexBaseRadius * (0.4 + Math.random() * 0.6);
-          // Randomize speeds slightly on respawn for variation
-          (smoke as any).orbitSpeed = (0.8 + Math.random() * 1.5) * 0.5;
-          (smoke as any).riseSpeed = (0.5 + Math.random() * 0.9) * 0.5;
-        }
-        
-        // Calculate lighting from bottom-right light source
-        const material = smoke.material as THREE.MeshBasicMaterial;
-        
-        // Vector from smoke to light (bottom right at x:60, y:-50, z:30)
-        const toLight = new THREE.Vector3(
-          lightPos.x - smoke.position.x,
-          lightPos.y - smoke.position.y,
-          lightPos.z - smoke.position.z
-        );
-        const distToLight = toLight.length();
-        toLight.normalize();
-        
-        // Simulate light intensity based on position (facing the light = brighter)
-        // Particles on the right side and bottom get more light
-        const lightFacing = (smoke.position.x + 60) / 120; // 0 to 1, right side brighter
-        const bottomBias = (1 - (smoke.position.y + 70) / 140); // Bottom is brighter
-        const depthFactor = 1 - Math.abs(smoke.position.z + 70) / 50; // Front particles catch more light
-        
-        // Combined lighting intensity
-        const lightIntensity = Math.max(0.1, Math.min(1, 
-          lightFacing * 0.5 + bottomBias * 0.3 + depthFactor * 0.3
-        ));
-        
-        // Falloff based on distance from light
-        const lightFalloff = Math.max(0.2, 1 - distToLight / 180);
-        
-        // Apply color based on lighting - brighter areas are lighter gray/white
-        const litColor = 0.1 + lightIntensity * lightFalloff * 0.5;
-        const shadowColor = 0.05;
-        const finalColor = shadowColor + (litColor - shadowColor) * lightIntensity;
-        material.color.setRGB(finalColor, finalColor, finalColor * 0.95); // Slightly warm tint
-        
-        // Opacity with volumetric depth
-        const centerBrightness = 1 - (radiusRatio * 0.3);
-        const verticalFade = heightRatio < 0.2 ? heightRatio * 5 : (heightRatio > 0.8 ? (1 - heightRatio) * 5 : 1);
-        const flicker = 0.9 + Math.sin(time * 4 + flickerPhase + i * 2) * 0.1; // Subtle flicker
-        const audioBoost = audioAverage * 0.3 + audioMax * 0.2;
-        
-        material.opacity = Math.max(0.08, Math.min(0.5, 
-          (baseOpacity + audioBoost) * centerBrightness * verticalFade * flicker * (0.8 + lightIntensity * 0.4)
-        ));
-        
-        // Scale varies with height (larger at bottom, smaller wisps at top)
-        const heightScale = 1.2 - heightRatio * 0.5;
-        const pulseScale = 1 + Math.sin(time * 1.5 + i * 0.4) * 0.1;
-        const audioScale = 1 + audioMax * 0.25;
-        const scale = heightScale * pulseScale * audioScale;
-        smoke.scale.set(scale, scale, scale);
-      });
+      // Smoke planes are static - no animation needed (like 2015-master)
+      // Only the sprite sheet texture animates via UV offsets
 
       // Animate lights
       pointLight1.intensity = 2 + audioMax * 2;
@@ -798,7 +748,7 @@ export default function TextVisualizer() {
             <p 
               className="leading-tight"
               style={{
-                fontSize: '36px',
+                fontSize: '40px',
                 fontFamily: 'Lexend-Medium, Arial, sans-serif',
                 fontWeight: 'normal',
                 display: 'flex',
@@ -827,7 +777,7 @@ export default function TextVisualizer() {
           <p 
             className="text-white text-center drop-shadow-[0_0_20px_rgba(74,144,226,0.5)]"
             style={{
-              fontSize: '36px',
+              fontSize: '40px',
               fontFamily: 'Lexend-Medium, Arial, sans-serif'
             }}
           >

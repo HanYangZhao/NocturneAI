@@ -1512,7 +1512,7 @@ Tuna.prototype.Panner.prototype = Object.create(Super, {
  * @param {number} [properties.depth=0.6]
  * @param {number} [properties.feedback=0.7]
  * @param {number} [properties.stereoPhase=40]
- * @param {number} [properties.baseModulationFrequency=700]
+ * @param {number} [properties.baseModFreq=700]
  * @param {boolean} [properties.bypass=false]
  */
 Tuna.prototype.Phaser = function (properties) {
@@ -1559,7 +1559,7 @@ Tuna.prototype.Phaser = function (properties) {
     this.merger.connect(this.output);
 
     this.rate = initValue(properties.rate, this.defaults.rate.value);
-    this.baseModulationFrequency = properties.baseModulationFrequency || this.defaults.baseModulationFrequency.value;
+    this.baseModFreq = properties.baseModFreq || this.defaults.baseModFreq.value;
     this.depth = initValue(properties.depth, this.defaults.depth.value);
     this.feedback = initValue(properties.feedback, this.defaults.feedback.value);
     this.stereoPhase = initValue(properties.stereoPhase, this.defaults.stereoPhase.value);
@@ -1606,7 +1606,7 @@ Tuna.prototype.Phaser.prototype = Object.create(Super, {
                 automatable: false,
                 type: FLOAT
             },
-            baseModulationFrequency: {
+            baseModFreq: {
                 value: 700,
                 min: 500,
                 max: 1500,
@@ -1633,8 +1633,8 @@ Tuna.prototype.Phaser.prototype = Object.create(Super, {
         },
         set: function (value) {
             this._depth = value;
-            this.lfoL.oscillation = this._baseModulationFrequency * this._depth;
-            this.lfoR.oscillation = this._baseModulationFrequency * this._depth;
+            this.lfoL.oscillation = this._baseModFreq * this._depth;
+            this.lfoR.oscillation = this._baseModFreq * this._depth;
         }
     },
     rate: {
@@ -1647,15 +1647,15 @@ Tuna.prototype.Phaser.prototype = Object.create(Super, {
             this.lfoR.frequency = this._rate;
         }
     },
-    baseModulationFrequency: {
+    baseModFreq: {
         enumerable: true,
         get: function () {
-            return this._baseModulationFrequency;
+            return this._baseModFreq;
         },
         set: function (value) {
-            this._baseModulationFrequency = value;
-            this.lfoL.offset = this._baseModulationFrequency;
-            this.lfoR.offset = this._baseModulationFrequency;
+            this._baseModFreq = value;
+            this.lfoL.offset = this._baseModFreq;
+            this.lfoR.offset = this._baseModFreq;
             this.depth = this._depth;
         }
     },

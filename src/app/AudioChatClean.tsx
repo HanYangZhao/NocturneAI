@@ -1696,6 +1696,36 @@ export default function AudioChatClean() {
                             } else {
                               muteMic();
                             }
+                          } else if (action === 'resetAllFX') {
+                            // Reset both particle FX and audio effects to default state
+                            // Disable all audio effects
+                            const resetEffects = effectsList.map((f) => ({ ...f, bypass: true }));
+                            setEffectsList(resetEffects);
+                            setActiveEffects(resetEffects);
+                            
+                            // Clear all audio effect parameters in the system
+                            for (const f of resetEffects) {
+                              try { 
+                                AudioFX.updateEffectParams(f.id, { bypass: true }); 
+                              } catch (e) {}
+                            }
+                            
+                            // Clear particle FX cache to reset visual effects
+                            try {
+                              const ParticleFX = require('./particlefx');
+                              if (ParticleFX?.clearCachedEffects) {
+                                ParticleFX.clearCachedEffects();
+                              }
+                            } catch (e) {}
+                            
+                            // Reset particle positions to original layout
+                            try {
+                              resetParticles();
+                            } catch (e) {
+                              logger.warn('[AudioChat] Failed to reset particle positions:', e);
+                            }
+                            
+                            logger.info('[AudioChat] All effects reset to default state via MIDI');
                           }
                         } catch (e) {
                           logger.warn('[MIDI] Failed to execute button action', action, e);
