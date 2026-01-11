@@ -424,6 +424,16 @@ export default function AudioChatClean() {
           // Decode audio
           let decoded = await ac.decodeAudioData(audioData.slice(0));
           
+          // Calculate text display speed based on audio duration
+          const audioDurationSecs = decoded.duration;
+          const wordCount = text.split(/\s+/).length;
+          if (audioDurationSecs > 0 && wordCount > 0) {
+            // Calculate milliseconds per word to fit the audio duration
+            const msPerWord = Math.max(100, (audioDurationSecs * 1000) / wordCount) - 10; // subtract 50ms for faster display
+            setTextDisplaySpeed(msPerWord);
+            logger.debug('[TTS]', voice.name, 'audio duration:', audioDurationSecs.toFixed(2), 'secs,', wordCount, 'words, calculated speed:', msPerWord.toFixed(0), 'ms/word');
+          }
+          
           // Convert mono to stereo if needed
           if (decoded.numberOfChannels === 1) {
             const monoBuffer = decoded;
@@ -633,7 +643,7 @@ export default function AudioChatClean() {
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const instructionSentRef = useRef<boolean>(false);
-  const [instruction, setInstruction] = useState<string>("You are a helpful assistant.");
+  const [instruction, setInstruction] = useState<string>("You are a helpful assistant.Do not answer unless I explicitly prompt you to do so. Keep your answers concise.");
   const [assistantResponse, setAssistantResponse] = useState<string>("");
   const assistantResponseRef = useRef<string>("");
   const openaiModel = "gpt-realtime-mini";
@@ -674,7 +684,7 @@ export default function AudioChatClean() {
         microphone: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true,
+          autoGainControl: false,
           stream: localStreamRef.current ?? undefined,
         },
       });

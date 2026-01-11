@@ -21,11 +21,21 @@ export default function TextVisualizer() {
   const smoothedBrightnessRef = useRef<number>(0); // Smoothed value for rendering
   const lastLoggedEffectsRef = useRef<string>(''); // Track last logged effects to avoid spam
   const isAudioPlayingRef = useRef<boolean>(false);
+  const smokeParticlesOriginalDataRef = useRef<Array<{ scale: number; opacity: number }>>([]);
+  const smokeAnimationTimeRef = useRef<number>(0);
+  const wasAudioPlayingRef = useRef<boolean>(false);
+  const smokeAnimationDurationRef = useRef<number>(0.7); // 0.5 seconds for expand/contract animation
+  const textDisplayDelayRef = useRef<number>(0); // Delay before showing text after audio starts
+  const audioStartTimeRef = useRef<number | null>(null); // Track when audio started
   const [displayedText, setDisplayedText] = useState('');
   const [currentWindowIndex, setCurrentWindowIndex] = useState(0);
   const textStartTimeRef = useRef<number | null>(null);
   const lastFullTextRef = useRef<string>('');
   const textMeshesRef = useRef<THREE.Mesh[]>([]);
+  const textSpriteRef = useRef<THREE.Sprite | null>(null);
+  const labelSpriteRef = useRef<THREE.Sprite | null>(null);
+  const displayedTextRef = useRef<string>('');
+  const textRoleRef = useRef<'user' | 'assistant' | null>(null);
   
   // Sprite sheet animation state
   const spriteCurrentFrameRef = useRef<number>(0);
@@ -97,6 +107,17 @@ export default function TextVisualizer() {
   // Sync audio playing state from context
   useEffect(() => {
     isAudioPlayingRef.current = isAudioPlaying;
+    
+    if (isAudioPlaying) {
+      // Audio just started - record the start time
+      audioStartTimeRef.current = Date.now();
+      textDisplayDelayRef.current = smokeAnimationDurationRef.current * 1000; // Convert to ms
+    } else {
+      // Audio stopped
+      audioStartTimeRef.current = null;
+      textDisplayDelayRef.current = 0;
+    }
+    
     // When audio stops, reset particles to idle state
     if (!isAudioPlaying) {
       logger.debug('[TextVisualizer] Audio stopped, resetting particles to idle state');
@@ -140,7 +161,7 @@ export default function TextVisualizer() {
     }
 
     const words = fullText.trim().split(/\s+/);
-    const wordsPerWindow = 25;
+    const wordsPerWindow = 30;
     const totalWindows = Math.ceil(words.length / wordsPerWindow);
     
     // Use speed from context (milliseconds per word)
@@ -149,6 +170,22 @@ export default function TextVisualizer() {
 
     const updateWindow = () => {
       if (!textStartTimeRef.current) return;
+      
+      // For assistant text, don't show until audio is actually playing AND delay period has passed
+      if (textRole === 'assistant' && !isAudioPlayingRef.current) {
+        setDisplayedText('');
+        return;
+      }
+      
+      // Check if we should start showing text (wait for cloud animation to finish)
+      if (audioStartTimeRef.current) {
+        const timeSinceAudioStart = Date.now() - audioStartTimeRef.current;
+        if (timeSinceAudioStart < textDisplayDelayRef.current) {
+          // Still in the delay period - don't show text yet
+          setDisplayedText('');
+          return;
+        }
+      }
       
       const elapsed = Date.now() - textStartTimeRef.current;
       const targetWindow = Math.floor(elapsed / millisecondsPerWindow);
@@ -177,6 +214,12 @@ export default function TextVisualizer() {
     };
   }, [fullText]);
 
+  // Update refs when displayedText or textRole changes
+  useEffect(() => {
+    displayedTextRef.current = displayedText;
+    textRoleRef.current = textRole;
+  }, [displayedText, textRole]);
+
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -204,7 +247,7 @@ export default function TextVisualizer() {
     });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setClearColor(0x000000, 1);
+    renderer.setClearColor(0x000000, 0); // Transparent background
     rendererRef.current = renderer;
     containerRef.current.appendChild(renderer.domElement);
 
@@ -299,6 +342,12 @@ export default function TextVisualizer() {
       
       scene.add(plane);
       smokeParticles.push(plane);
+      
+      // Store original scale and opacity for animation
+      smokeParticlesOriginalDataRef.current.push({
+        scale: scale,
+        opacity: 0.2
+      });
     }
 
     // Lighting
@@ -628,8 +677,57 @@ export default function TextVisualizer() {
         // (Brightness is now applied before particle effects - see above)
       }
 
-      // Smoke planes are static - no animation needed (like 2015-master)
-      // Only the sprite sheet texture animates via UV offsets
+      // Animate smoke planes: expand and fade out when audio plays, reverse when audio stops
+      if (isAudioPlayingRef.current && !wasAudioPlayingRef.current) {
+        // Audio just started - begin expand animation
+        smokeAnimationTimeRef.current = 0;
+        wasAudioPlayingRef.current = true;
+      } else if (!isAudioPlayingRef.current && wasAudioPlayingRef.current) {
+        // Audio just stopped - begin contract animation
+        smokeAnimationTimeRef.current = 0;
+        wasAudioPlayingRef.current = false;
+      }
+
+      // Update smoke animation progress
+      if (isAudioPlayingRef.current || (!isAudioPlayingRef.current && smokeAnimationTimeRef.current < smokeAnimationDurationRef.current)) {
+        smokeAnimationTimeRef.current += delta / 1000; // Convert to seconds
+        const animationProgress = Math.min(smokeAnimationTimeRef.current / smokeAnimationDurationRef.current, 1);
+        
+        // Apply easing function for smooth animation (ease-in-out cubic)
+        const easeProgress = animationProgress < 0.5
+          ? 4 * animationProgress * animationProgress * animationProgress
+          : 1 - Math.pow(-2 * animationProgress + 2, 3) / 2;
+        
+        smokeParticles.forEach((plane, idx) => {
+          const originalData = smokeParticlesOriginalDataRef.current[idx];
+          if (!originalData) return;
+          
+          if (isAudioPlayingRef.current) {
+            // Expand and fade out
+            const expandScale = 1 + easeProgress * 3; // Scale up to 4x
+            const fadeOpacity = originalData.opacity * (1 - easeProgress);
+            
+            plane.scale.set(
+              originalData.scale * expandScale,
+              originalData.scale * expandScale,
+              1
+            );
+            (plane.material as THREE.MeshBasicMaterial).opacity = fadeOpacity;
+          } else {
+            // Contract and fade in (reverse animation)
+            const contractScale = 1 + (1 - easeProgress) * 3; // Scale from 4x back to 1x
+            const fadeOpacity = originalData.opacity * easeProgress; // Fade in as it contracts
+            
+            plane.scale.set(
+              originalData.scale * contractScale,
+              originalData.scale * contractScale,
+              1
+            );
+            (plane.material as THREE.MeshBasicMaterial).opacity = fadeOpacity;
+          }
+          (plane.material as THREE.MeshBasicMaterial).needsUpdate = true;
+        });
+      }
 
       // Animate lights
       pointLight1.intensity = 2 + audioMax * 2;
@@ -703,43 +801,25 @@ export default function TextVisualizer() {
 
   return (
     <div className="fixed inset-0 bg-black text-white flex items-center justify-center overflow-hidden">
-      <div ref={containerRef} className="absolute inset-0" />
-      
       <style>{`
-        @keyframes smokeFormation {
-          0% {
-            opacity: 0;
-            filter: blur(8px) opacity(0);
-            transform: translate(-20px, 10px) scale(0.8);
-          }
-          50% {
-            filter: blur(4px);
-          }
-          100% {
-            opacity: 1;
-            filter: blur(0px);
-            transform: translate(0, 0) scale(1);
-          }
+        @keyframes dotPulse {
+          0%, 20% { opacity: 0.4; }
+          50% { opacity: 1; }
+          100% { opacity: 0.4; }
         }
-        
-        @keyframes smokeGlow {
-          0%, 100% {
-            text-shadow: 
-              0 0 5px rgba(100, 200, 255, 0.2),
-              0 0 10px rgba(100, 200, 255, 0.1);
-          }
-          50% {
-            text-shadow: 
-              0 0 8px rgba(100, 200, 255, 0.3),
-              0 0 15px rgba(100, 200, 255, 0.2),
-              0 0 20px rgba(100, 200, 255, 0.1);
-          }
+        .dot {
+          display: inline-block;
+          animation: dotPulse 1.4s infinite;
         }
+        .dot:nth-child(1) { animation-delay: 0s; }
+        .dot:nth-child(2) { animation-delay: 0.2s; }
+        .dot:nth-child(3) { animation-delay: 0.4s; }
       `}</style>
       
-      <div className="relative z-10 w-full px-8 pointer-events-none">
+      {/* Text layer - behind canvas */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
         {displayedText && (
-          <div className="text-center">
+          <div className="text-center max-w-4xl">
             <div className={`text-sm uppercase tracking-wider mb-4 ${
               textRole === 'user' ? 'text-blue-400' : 'text-green-400'
             }`}>
@@ -750,30 +830,14 @@ export default function TextVisualizer() {
               style={{
                 fontSize: '40px',
                 fontFamily: 'Lexend-Medium, Arial, sans-serif',
-                fontWeight: 'normal',
-                display: 'flex',
-                flexWrap: 'wrap',
-                justifyContent: 'center',
-                gap: '8px'
+                fontWeight: 'normal'
               }}
             >
-              {displayedText.split(/\s+/).map((word, index) => (
-                <span
-                  key={`${word}-${index}-${currentWindowIndex}`}
-                  style={{
-                    display: 'inline-block',
-                    animation: `smokeFormation 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards, smokeGlow 2s ease-in-out infinite`,
-                    animationDelay: `${index * 80}ms`,
-                    opacity: 0
-                  }}
-                >
-                  {word}
-                </span>
-              ))}
+              {displayedText}
             </p>
           </div>
         )}
-        {!displayedText && (
+        {!displayedText && !isAudioPlaying && !currentUserText && !currentAssistantText && (
           <p 
             className="text-white text-center drop-shadow-[0_0_20px_rgba(74,144,226,0.5)]"
             style={{
@@ -782,12 +846,15 @@ export default function TextVisualizer() {
             }}
           >
             Nocturne AI 
-            <span className="dot">.</span>
-            <span className="dot">.</span>
-            <span className="dot">.</span>
+            <span className="dot mx-1">.</span>
+            <span className="dot mx-1">.</span>
+            <span className="dot mx-1">.</span>
           </p>
         )}
       </div>
+      
+      {/* Three.js canvas layer - on top */}
+      <div ref={containerRef} className="absolute inset-0 z-10" />
     </div>
   );
 }
