@@ -781,7 +781,10 @@ export default function TextVisualizer() {
               fontFamily: 'Lexend-Medium, Arial, sans-serif'
             }}
           >
-            Nocturne AI is listening...
+            Nocturne AI 
+            <span className="dot">.</span>
+            <span className="dot">.</span>
+            <span className="dot">.</span>
           </p>
         )}
       </div>
