@@ -59,6 +59,100 @@ export default function AudioChatClean() {
         logger.info('[TTS] Audio playback stopped by user');
         unmuteMic();
       }
+      
+      // Play test audio sample through the effect chain
+      async function playSampleAudio() {
+        try {
+          setIsPlayingSample(true);
+          
+          // Initialize audio context if needed
+          if (!audioContextRef.current) {
+            audioContextRef.current = new AudioContext();
+            logger.debug('[Sample] Created AudioContext');
+          }
+          const ac = audioContextRef.current;
+          
+          // Fetch and decode the sample audio
+          const response = await fetch('/sample.mp3');
+          if (!response.ok) throw new Error(`Failed to fetch sample: ${response.status}`);
+          const arrayBuffer = await response.arrayBuffer();
+          const audioBuffer = await ac.decodeAudioData(arrayBuffer);
+          logger.debug('[Sample] Decoded audio sample');
+          
+          // Fetch sample text
+          let sampleText = '';
+          try {
+            const textResponse = await fetch('/sample.txt');
+            if (textResponse.ok) {
+              sampleText = await textResponse.text();
+              logger.debug('[Sample] Loaded sample text');
+            }
+          } catch (e) {
+            logger.warn('[Sample] Failed to load sample text:', e);
+          }
+          
+          // Initialize mixer if needed
+          if (!audioMixerRef.current && outDestinationRef.current) {
+            audioMixerRef.current = new AudioMixer(ac, outDestinationRef.current);
+            logger.debug('[Sample] Audio mixer initialized');
+          }
+          
+          // Create source and connect through mixer (so brightness analyzers can track it)
+          const source = ac.createBufferSource();
+          source.buffer = audioBuffer;
+          sampleAudioRef.current = source;
+          
+          // Connect to mixer's master gain so it goes through effects chain and brightness analyzers
+          const masterGain = audioMixerRef.current?.getMasterGain();
+          if (masterGain) {
+            source.connect(masterGain);
+            logger.info('[Sample] Connected to mixer master gain for analysis');
+          } else {
+            logger.warn('[Sample] No master gain available, connecting directly');
+            const dest = outDestinationRef.current || ac.destination;
+            source.connect(dest);
+          }
+          
+          // Connect through effects chain to post-effects gain (so analyzers can read it)
+          AudioFX.asyncConnectChain(masterGain as unknown as AudioNode, postEffectsGainRef.current as unknown as AudioNode);
+          logger.debug('[Sample] Effects chain connected through post-effects gain node');
+          
+          // Display sample text in visualizer
+          if (sampleText) {
+            // Set the complete text at once - the visualizer will handle displaying it in 30-word windows
+            addAssistantText(sampleText, false);
+            logger.debug('[Sample] Set full sample text to visualizer:', sampleText.split(/\s+/).length, 'words');
+          }
+          
+          source.start(0);
+          // Start particle FX (brightness analysis) when sample plays
+          startBrightnessAnalysis();
+          source.onended = () => {
+            setIsPlayingSample(false);
+            sampleAudioRef.current = null;
+            stopBrightnessAnalysis();
+            logger.debug('[Sample] Sample playback ended');
+          };
+        } catch (err) {
+          setIsPlayingSample(false);
+          logger.error('[Sample] Failed to play sample audio:', err);
+        }
+      }
+      
+      function stopSampleAudio() {
+        try {
+          if (sampleAudioRef.current) {
+            sampleAudioRef.current.stop();
+            sampleAudioRef.current.disconnect();
+            sampleAudioRef.current = null;
+          }
+          stopBrightnessAnalysis();
+          setIsPlayingSample(false);
+          logger.debug('[Sample] Sample playback stopped');
+        } catch (e) {
+          logger.warn('[Sample] Error stopping sample:', e);
+        }
+      }
     const [micMuted, setMicMuted] = useState(false);
     const micMutedRef = useRef(false);
   // --- TTS and mic helpers (must be inside component for refs) ---
@@ -116,6 +210,10 @@ export default function AudioChatClean() {
     return DEFAULT_PAN_PRESETS;
   });
   const [currentPanPresetId, setCurrentPanPresetId] = useState<string>("preset1");
+  
+  // Sample audio player state
+  const sampleAudioRef = useRef<AudioBufferSourceNode | null>(null);
+  const [isPlayingSample, setIsPlayingSample] = useState(false);
 
   // Persist pan presets to localStorage
   useEffect(() => {
@@ -1264,6 +1362,16 @@ export default function AudioChatClean() {
             <div className="mt-3">
               <div className="flex items-center justify-between mb-2">
                 <label className="block text-sm font-medium">Voice Mixer (2D Control)</label>
+                <button
+                  onClick={isPlayingSample ? stopSampleAudio : playSampleAudio}
+                  className={`px-2 py-1 text-xs rounded ${
+                    isPlayingSample
+                      ? 'bg-yellow-500 text-white'
+                      : 'bg-blue-600 text-white'
+                  }`}
+                >
+                  {isPlayingSample ? 'Stop Sample' : 'Play Audio Sample'}
+                </button>
               </div>
               <div className="p-3 border rounded bg-gray-50">
                 <TriangleMixer
@@ -1583,7 +1691,7 @@ export default function AudioChatClean() {
             </div>
             <div className="mt-2 grid grid-cols-2 grid-rows-5 gap-3">
               {effectsList.map((fx, idx) => (
-                <div key={fx.id} className="p-2 border rounded bg-gray-50 text-xs">
+                <div key={fx.id} className={`p-2 border rounded text-xs ${fx.bypass ? 'bg-gray-50' : 'bg-green-100'}`}>
                   <div className="flex items-center justify-between">
                     <div className="font-medium">{fx.type}</div>
                     <div className="flex items-center gap-2">
