@@ -23,6 +23,7 @@ export function updateCachedEffects(effects: Array<{ id: string; type: string; p
  */
 export function clearCachedEffects() {
   cachedEffects = [];
+  resetPhaserState(); // Reset phaser state when clearing effects
   logger.info('[ParticleFX] Cached effects cleared - reset to default state');
 }
 
@@ -175,8 +176,8 @@ export function getParticleEffectState(): ParticleEffectState {
 
         // Reduce default depth to 40% of provided/default to make modulation gentler
         const depth = Math.max(0, Math.min(1, paramDepth * 0.4));
-        // Clamp rate to a sensible maximum to avoid very rapid flashing (limit to 10Hz)
-        const rate = Math.max(0.1, Math.min(10, paramRate));
+        // Scale frequency directly to wave rate - higher frequency = faster waves (0.1Hz to 50Hz range)
+        const rate = Math.max(0.025, paramRate * 0.025); // Scale down by 20x to get reasonable wave speeds
 
         state.radial = { depth, rate };
         break;
@@ -245,22 +246,39 @@ export function applyDelayToParticles(
 /**
  * Apply phaser effect to particles
  * Creates a sweeping modulation of particle positions
+ * Uses accumulated phase to prevent jitter when rate changes
  */
+let phaserAccumulatedPhase = 0;
+let lastPhaserRate = 0;
+let lastPhaserDepth = 0;
+const phaserPhaseSmoothing = 0.15; // How quickly to smooth rate changes (0-1, lower = smoother)
+const depthSmoothing = 0.12; // Smooth depth changes to prevent pops
+
 export function applyPhaserToParticles(
   positions: Float32Array,
   phaser: ParticleEffectState['phaser'],
   time: number,
-  particleCount: number
+  particleCount: number,
+  deltaTime: number = 0.016 // ~60fps default
 ): Float32Array {
   if (!phaser || phaser.depth === 0) {
     return new Float32Array(positions);
   }
 
   const modPositions = new Float32Array(positions);
-  // Use a much smaller multiplier and make it relative to prevent particles flying off
-  // At depth=1: creates a gentle wave motion of ±0.5 units max
-  const phase = Math.sin(time * phaser.rate * 1.2 * Math.PI);
-  const sweepIntensity = phaser.depth * 0.5; // Reduced from 5 to 0.5!
+  
+  // Smooth rate changes to prevent discontinuities
+  // Exponential smoothing: smoothedValue += (targetValue - smoothedValue) * smoothingFactor
+  lastPhaserRate += (phaser.rate - lastPhaserRate) * phaserPhaseSmoothing;
+  lastPhaserDepth += (phaser.depth - lastPhaserDepth) * depthSmoothing;
+
+  // Accumulate phase based on smoothed rate to prevent jitter
+  // This ensures continuous phase progression even when rate changes
+  phaserAccumulatedPhase += lastPhaserRate * deltaTime * Math.PI * 2;
+  
+  // Use accumulated phase instead of raw time for smooth transitions
+  const phase = Math.sin(phaserAccumulatedPhase * 0.5);
+  const sweepIntensity = lastPhaserDepth * 2.5; // Use smoothed depth
 
   for (let i = 0; i < modPositions.length; i += 3) {
     // Apply gentle sweep to X and Z axes with varying phase per particle
@@ -270,6 +288,15 @@ export function applyPhaserToParticles(
   }
 
   return modPositions as any;
+}
+
+/**
+ * Reset phaser state - call when effects are cleared or audio stops
+ */
+export function resetPhaserState() {
+  phaserAccumulatedPhase = 0;
+  lastPhaserRate = 0;
+  lastPhaserDepth = 0;
 }
 
 /**
@@ -450,6 +477,9 @@ export function applyOverdriveToParticles(
  * Apply radial modulation effect to particles
  * Creates expanding/contracting waves from the center point
  */
+let lastRadialCenterRef: [number, number, number] | null = null;
+let radialCenterSmoothingFactor = 0.1; // Smooth center changes to prevent jittering
+
 export function applyRadialModulationToParticles(
   positions: Float32Array,
   colors: Float32Array,
@@ -464,7 +494,7 @@ export function applyRadialModulationToParticles(
   const modPositions = new Float32Array(positions);
   const modColors = new Float32Array(colors);
 
-  // Calculate center of particle cloud
+  // Calculate center of particle cloud with smoothing to prevent jitter
   let centerX = 0, centerY = 0, centerZ = 0;
   for (let i = 0; i < modPositions.length; i += 3) {
     centerX += modPositions[i];
@@ -475,11 +505,22 @@ export function applyRadialModulationToParticles(
   centerY /= particleCount;
   centerZ /= particleCount;
 
+  // Smooth the center to prevent sudden jumps
+  if (lastRadialCenterRef === null) {
+    lastRadialCenterRef = [centerX, centerY, centerZ];
+  } else {
+    centerX = lastRadialCenterRef[0] + (centerX - lastRadialCenterRef[0]) * radialCenterSmoothingFactor;
+    centerY = lastRadialCenterRef[1] + (centerY - lastRadialCenterRef[1]) * radialCenterSmoothingFactor;
+    centerZ = lastRadialCenterRef[2] + (centerZ - lastRadialCenterRef[2]) * radialCenterSmoothingFactor;
+    lastRadialCenterRef = [centerX, centerY, centerZ];
+  }
+
   // Normalize depth to reasonable range (0-1 maps to visible-dramatic)
   // This allows good control while keeping particles visible
   const normalizedDepth = Math.max(0, Math.min(1, radial.depth));
-  const waveIntensity = normalizedDepth * 3; // Increased for more visible effect
+  const waveIntensity = normalizedDepth * 2.5; // Moderate wave intensity
   const waveFrequency = Math.max(0.1, radial.rate); // Prevent zero or negative frequency
+  const baseDistance = 15; // Reference distance for wave scaling
 
   for (let i = 0; i < particleCount; i++) {
     const posIdx = i * 3;
@@ -519,13 +560,6 @@ export function applyRadialModulationToParticles(
       modPositions[posIdx + 1] += (Math.random() - 0.5) * repulsion;
       modPositions[posIdx + 2] += (Math.random() - 0.5) * repulsion;
     }
-
-    // Brighten/dim based on wave phase for visual feedback
-    const waveBrightness = 0.5 + Math.sin(time * waveFrequency) * 0.5;
-    const brightness = 0.7 + waveBrightness * 0.3;
-    modColors[colorIdx] *= brightness;
-    modColors[colorIdx + 1] *= brightness;
-    modColors[colorIdx + 2] *= brightness;
   }
 
   logger.debug('[ParticleFX] Radial modulation applied - depth:', normalizedDepth, 'frequency:', waveFrequency, 'intensity:', waveIntensity);
@@ -575,12 +609,14 @@ export function applyEffectDebugTint(
 }
 
 let isFirstCall = true;
+let lastEffectUpdateTime = 0;
 
 export function applyAllParticleEffects(
   positions: Float32Array,
   colors: Float32Array,
   time: number,
-  particleCount: number
+  particleCount: number,
+  deltaTime?: number
 ): {
   positions: Float32Array;
   colors: Float32Array;
@@ -593,6 +629,9 @@ export function applyAllParticleEffects(
     isFirstCall = false;
   }
   
+  // Calculate deltaTime if not provided
+  const dt = deltaTime ?? 0.016; // Default to ~60fps (16ms)
+  
   const effectState = getParticleEffectState();
   let currentPositions: any = new Float32Array(positions);
   let currentColors: any = new Float32Array(colors);
@@ -602,7 +641,7 @@ export function applyAllParticleEffects(
 
   // Apply phaser
   if (effectState.phaser) {
-    currentPositions = applyPhaserToParticles(currentPositions, effectState.phaser, time, particleCount);
+    currentPositions = applyPhaserToParticles(currentPositions, effectState.phaser, time, particleCount, dt);
   }
 
 //   // Apply filter

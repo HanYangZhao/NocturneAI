@@ -494,7 +494,10 @@ export default function TextVisualizer() {
         const particleCount = positionArray.length / 3;
         
         // Create working copies for animation
-        const positions = new Float32Array(positionArray);
+        // IMPORTANT: Start from original positions to prevent cumulative drift from effects
+        const positions = particleOriginalPositionsRef.current 
+          ? new Float32Array(particleOriginalPositionsRef.current)
+          : new Float32Array(positionArray);
         
         // Start with original colors and apply brightness FIRST
         let colors: Float32Array;
@@ -531,21 +534,21 @@ export default function TextVisualizer() {
             ? Math.abs(audioData[i / 3]) * 5 
             : 0;
           
-          positions[i + 1] += Math.sin(time + i) * 0.02 + audioInfluence * 0.1;
+          positions[i + 1] += Math.sin(time + i) * 0.01 + audioInfluence * 0.05;
           
-          // Wrap around
-          if (positions[i + 1] > 100) positions[i + 1] = -100;
-          if (positions[i + 1] < -100) positions[i + 1] = 100;
+          // Note: Removed wrapping to allow particle effects to expand/contract particles naturally
         }
 
         // Apply particle effects based on audio effects (only when audio is playing)
         let effectsResult: any;
         if (isAudioPlayingRef.current) {
+          const deltaSeconds = delta / 1000; // Convert delta from ms to seconds
           effectsResult = ParticleFX.applyAllParticleEffects(
             positions,
             colors,
             time,
-            particleCount
+            particleCount,
+            deltaSeconds
           );
         } else {
           // When audio is not playing, use unmodified positions and colors
@@ -819,18 +822,19 @@ export default function TextVisualizer() {
       {/* Text layer - behind canvas */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
         {displayedText && (
-          <div className="text-center max-w-4xl">
+          <div className="text-center max-w-6xl">
             <div className={`text-sm uppercase tracking-wider mb-4 ${
               textRole === 'user' ? 'text-blue-400' : 'text-green-400'
             }`}>
               {textRole === 'user' ? 'USER' : 'NOCTURNE AI'}
             </div>
             <p 
-              className="leading-tight"
+              className="leading-relaxed"
               style={{
                 fontSize: '40px',
                 fontFamily: 'Lexend-Medium, Arial, sans-serif',
-                fontWeight: 'normal'
+                fontWeight: 'normal',
+                lineHeight: '1.8'
               }}
             >
               {displayedText}
