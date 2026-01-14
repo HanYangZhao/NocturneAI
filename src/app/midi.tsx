@@ -5,7 +5,7 @@ import * as AudioFX from "./audiofx";
 import logger from "./logger";
 import * as ExportImport from "./exportImport";
 
-const midiCCScaler = 1.5
+const midiCCScaler = 1
 
 // Utility to format numeric values for display
 export function formatNumericValue(n: unknown): string {
@@ -363,9 +363,9 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
               if (paramName === 'bits' || paramName === 'algorithmIndex' || paramName === 'automakeup') {
                 mapped = Math.round(mapped);
               }
-              // Cast bypass to boolean
+              // Cast bypass to binary: >= 0.5 maps to 1, < 0.5 maps to 0
               if (paramName === 'bypass') {
-                mapped = mapped > 0.5 ? 1 : 0;
+                mapped = mapped >= 0.5 ? 1 : 0;
               }
               // call AudioFX.updateEffectParams
               try {
@@ -440,7 +440,7 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
                 
                 // Cast bypass to boolean - toggle on note press
                 if (paramName === 'bypass') {
-                  const currentBypass = eff.bypass ? 1 : 0;
+                  const currentBypass = eff.params.bypass ? 1 : 0;
                   mapped = currentBypass ? 0 : 1; // toggle
                   logger.debug('[MIDI] Bypass param - current:', currentBypass, '-> toggled to:', mapped);
                 } else {

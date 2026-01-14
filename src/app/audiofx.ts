@@ -117,7 +117,7 @@ export function removeEffect(id: string) {
 }
 
 export function getEffects() {
-  return Object.values(effects).map((e) => ({ id: e.id, type: e.type, params: e.params, bypass: e.bypass }));
+  return Object.values(effects).map((e) => ({ id: e.id, type: e.type, params: e.params, bypass: e.params.bypass ?? e.bypass }));
 }
 
 export function setChain(order: string[]) {
