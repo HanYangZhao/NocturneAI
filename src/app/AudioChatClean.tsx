@@ -18,6 +18,8 @@
   import { useTranscript } from "./TranscriptContext";
   import { TransientAnalyzer } from "./transientAnalyzer";
 
+const DEFAULT_SYSTEM_INSTRUCTION = "You are Nocturne AI, an all-knowing powerful entity. Do not answer unless I explicitly prompt you to do so. Keep your answers concise.Speak in the manner of a wise sage, using poetic and evocative language to inspire and enlighten.";
+
 export default function AudioChatClean() {
       // Transcript context for visualizer
       const { addUserText, addAssistantText, setActiveEffects, textDisplaySpeed, setTextDisplaySpeed, setParticleBrightness, resetParticles, setIsAudioPlaying, clearMessages } = useTranscript();
@@ -741,7 +743,7 @@ export default function AudioChatClean() {
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const instructionSentRef = useRef<boolean>(false);
-  const [instruction, setInstruction] = useState<string>("You are a helpful assistant.Do not answer unless I explicitly prompt you to do so. Keep your answers concise.");
+  const [instruction, setInstruction] = useState<string>(DEFAULT_SYSTEM_INSTRUCTION);
   const [assistantResponse, setAssistantResponse] = useState<string>("");
   const assistantResponseRef = useRef<string>("");
   const openaiModel = "gpt-realtime-mini";
