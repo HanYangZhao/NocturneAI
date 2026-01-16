@@ -428,9 +428,20 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
           logger.debug('[MIDI] Slot targets:', slot.targets);
           if (slot.targets && slot.targets.length > 0) {
             logger.debug('[MIDI] Applying', slot.targets.length, 'targets with velocity', velocity);
+            // Get current effect states ONCE before processing targets, to avoid stale state issues
+            const currentEffectStates: Record<string, any> = {};
+            for (const t of slot.targets) {
+              if (!currentEffectStates[t.effectId]) {
+                const eff = AudioFX.getEffects().find((e: any) => e.id === t.effectId);
+                if (eff) {
+                  currentEffectStates[t.effectId] = { ...eff };
+                }
+              }
+            }
+            
             for (const t of slot.targets) {
               try {
-                const eff = AudioFX.getEffects().find((e: any) => e.id === t.effectId);
+                const eff = currentEffectStates[t.effectId];
                 if (!eff) {
                   logger.warn('[MIDI] Effect not found:', t.effectId);
                   continue;
@@ -548,8 +559,7 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
       if (inp) inp.onmidimessage = handleMidiMessage;
       inputsRef.current = inp ? [inp] : [];
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedInputId, midiAccess]);
+  }, [selectedInputId, midiAccess, mappings]);
 
   // Cleanup stored mappings: remove targets that reference missing effects or invalid params
   useEffect(() => {
@@ -636,11 +646,8 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
                               <label className="text-xs text-gray-600">
                                 <input type="radio" checked={slot.assignedNote !== null} onChange={() => {
                                   const next = mappings.slice();
-                                  // When switching to Note mode, ensure targets are set with bypass if not already present
-                                  const newTargets = slot.targets && slot.targets.length > 0 ? slot.targets : 
-                                    (slot.targets?.some(t => t.paramKey === 'bypass') ? slot.targets : 
-                                      [{ effectId: (AudioFX.getEffects()[0]?.id || ''), paramKey: 'bypass' }]);
-                                  next[i] = { ...next[i], assignedCC: null, targets: newTargets }; 
+                                  // When switching to Note mode, don't auto-create targets - let user explicitly add them via "Add" button
+                                  next[i] = { ...next[i], assignedCC: null }; 
                                   setMappings(next);
                                 }} className="mr-1" />
                                 Note
@@ -648,11 +655,8 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
                               <input type="number" min={0} max={127} value={slot.assignedNote ?? ""} onChange={(e) => {
                                 const v = e.target.value === "" ? null : Math.max(0, Math.min(127, Number(e.target.value)));
                                 const next = mappings.slice(); 
-                                // Ensure targets exist when setting note value
-                                const newTargets = slot.targets && slot.targets.length > 0 ? slot.targets : 
-                                  (slot.targets?.some(t => t.paramKey === 'bypass') ? slot.targets : 
-                                    [{ effectId: (AudioFX.getEffects()[0]?.id || ''), paramKey: 'bypass' }]);
-                                next[i] = { ...next[i], assignedCC: null, assignedNote: v, targets: newTargets }; 
+                                // Just set the note - don't auto-create targets, let user explicitly add them via "Add" button
+                                next[i] = { ...next[i], assignedCC: null, assignedNote: v }; 
                                 setMappings(next);
                               }} className="w-20 p-1 border text-xs" disabled={slot.assignedCC !== null} />
                             </div>
@@ -706,7 +710,9 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
                           <div className="mt-2 space-y-2">
                             {(slot.targets || []).map((t, ti) => (
                               <div key={ti} className="flex items-center gap-2">
-                                <select value={t.effectId} onChange={(e) => updateTarget(i, ti, { effectId: e.target.value, paramKey: '' })} className="p-1 text-xs border">
+                                <select value={t.effectId} onChange={(e) => {
+                                  updateTarget(i, ti, { effectId: e.target.value });
+                                }} className="p-1 text-xs border">
                                   {AudioFX.getEffects().map((eff: any) => <option key={eff.id} value={eff.id}>{eff.type}</option>)}
                                 </select>
                                 <select value={t.paramKey} onChange={(e) => updateTarget(i, ti, { paramKey: e.target.value })} className="p-1 text-xs border">
