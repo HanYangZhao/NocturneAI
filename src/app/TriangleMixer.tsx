@@ -9,6 +9,7 @@ interface TriangleMixerProps {
     enabled: boolean;
     elevenLabsVoiceId?: string;
   }>;
+  voiceOutputEnabled?: { [voiceId: string]: boolean };
   onMixChange: (mix: { [voiceId: string]: number }) => void;
 }
 
@@ -17,7 +18,7 @@ interface TriangleMixerProps {
  * Place a dot in the circle to control the mix of all enabled voices
  * Center = equal mix, edges favor individual voices
  */
-export default function TriangleMixer({ voices, onMixChange }: TriangleMixerProps) {
+export default function TriangleMixer({ voices, voiceOutputEnabled, onMixChange }: TriangleMixerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [position, setPosition] = useState({ x: 0.5, y: 0.5 }); // Normalized 0-1
@@ -32,7 +33,7 @@ export default function TriangleMixer({ voices, onMixChange }: TriangleMixerProp
 
   // Calculate voice volumes based on position using barycentric-like coordinates
   const calculateMix = (x: number, y: number): { [key: string]: number } => {
-    const enabledVoices = voices.filter(v => v.enabled && v.elevenLabsVoiceId);
+    const enabledVoices = voices.filter(v => v.enabled && v.elevenLabsVoiceId && voiceOutputEnabled?.[v.id] !== false);
     const numVoices = enabledVoices.length;
     
     if (numVoices === 0) return {};
@@ -107,7 +108,7 @@ export default function TriangleMixer({ voices, onMixChange }: TriangleMixerProp
     // Draw three sections with subtle shading
     const voice1Angle = 0;
     const voice2Angle = (2 * Math.PI) / 3;
-    const enabledVoices = voices.filter(v => v.enabled && v.elevenLabsVoiceId);
+    const enabledVoices = voices.filter(v => v.enabled && v.elevenLabsVoiceId && voiceOutputEnabled?.[v.id] !== false);
     const numVoices = enabledVoices.length;
     
     if (numVoices === 0) return;
@@ -198,7 +199,7 @@ export default function TriangleMixer({ voices, onMixChange }: TriangleMixerProp
     ctx.lineWidth = 2;
     ctx.stroke();
     
-  }, [position, voices, center.x, center.y, radius, size]);
+  }, [position, voices, voiceOutputEnabled, center.x, center.y, radius, size]);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     setIsDragging(true);

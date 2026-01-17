@@ -223,6 +223,23 @@ export default function AudioChatClean() {
   const sampleAudioRef = useRef<AudioBufferSourceNode | null>(null);
   const [isPlayingSample, setIsPlayingSample] = useState(false);
 
+  // Per-voice TTS output enable/disable state
+  const [voiceOutputEnabled, setVoiceOutputEnabled] = useState<{ [voiceId: string]: boolean }>(() => {
+    if (typeof window === 'undefined') {
+      return {};
+    }
+    try {
+      const stored = localStorage.getItem('nocturne_voice_output_enabled');
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch (e) {
+      console.warn('Failed to load voice output settings from localStorage', e);
+    }
+    // Default all voices to output enabled
+    return voicesConfig.voices.reduce((acc, v) => ({ ...acc, [v.id]: true }), {});
+  });
+
   // Persist pan presets to localStorage
   useEffect(() => {
     try {
@@ -231,6 +248,15 @@ export default function AudioChatClean() {
       console.warn('Failed to save pan presets to localStorage', e);
     }
   }, [panPresets]);
+
+  // Persist voice output settings to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('nocturne_voice_output_enabled', JSON.stringify(voiceOutputEnabled));
+    } catch (e) {
+      console.warn('Failed to save voice output settings to localStorage', e);
+    }
+  }, [voiceOutputEnabled]);
 
   // Keep micMutedRef in sync with micMuted state
   useEffect(() => {
@@ -492,11 +518,11 @@ export default function AudioChatClean() {
         startBrightnessAnalysis();
       }
       
-      // Get all enabled voices
-      const enabledVoices = voices.filter(v => v.enabled && v.elevenLabsVoiceId);
+      // Get all enabled voices that have output enabled
+      const enabledVoices = voices.filter(v => v.enabled && v.elevenLabsVoiceId && voiceOutputEnabled[v.id]);
       if (enabledVoices.length === 0) {
-        logger.warn('[TTS] No enabled voices found, falling back to default');
-        enabledVoices.push(voices[0]); // Use first voice as fallback
+        logger.warn('[TTS] No enabled voices with output available, skipping TTS');
+        return;
       }
       
       logger.debug('[TTS] Playing on', enabledVoices.length, 'voice(s) simultaneously');
@@ -1399,6 +1425,7 @@ export default function AudioChatClean() {
               <div className="p-3 border rounded bg-gray-50">
                 <TriangleMixer
                   voices={voices}
+                  voiceOutputEnabled={voiceOutputEnabled}
                   onMixChange={(mix) => {
                     // Update mixer volumes based on 2D control
                     if (audioMixerRef.current) {
@@ -1413,6 +1440,31 @@ export default function AudioChatClean() {
                   <div className="text-xs text-gray-500 text-center py-2 mt-2">
                     Configure voices in src/app/voices.json
                   </div>
+                )}
+              </div>
+            </div>
+            {/* Per-voice TTS output controls */}
+            <div className="mt-3 p-3 border rounded bg-gray-50">
+              <label className="block text-sm font-medium mb-2">Output Voices</label>
+              <div className="flex flex-col gap-2">
+                {voices.filter(v => v.enabled && v.elevenLabsVoiceId).map(voice => (
+                  <label key={voice.id} className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={voiceOutputEnabled[voice.id] !== false}
+                      onChange={(e) => {
+                        setVoiceOutputEnabled(prev => ({
+                          ...prev,
+                          [voice.id]: e.target.checked
+                        }));
+                      }}
+                      className="w-4 h-4"
+                    />
+                    <span className="text-sm">{voice.name}</span>
+                  </label>
+                ))}
+                {voices.filter(v => v.enabled && v.elevenLabsVoiceId).length === 0 && (
+                  <div className="text-xs text-gray-500">No output voices configured</div>
                 )}
               </div>
             </div>
