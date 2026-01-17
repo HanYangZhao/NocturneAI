@@ -15,7 +15,7 @@ export function formatNumericValue(n: unknown): string {
 }
 
 // Available effect types
-export const EFFECT_TYPES = ['Delay', 'Phaser', 'Convolver', 'Compressor', 'Filter', 'Tremolo', 'Bitcrusher', 'Chorus', 'Overdrive', 'RingModulator'] as const;
+export const EFFECT_TYPES = ['Overdrive','Bitcrusher','Filter','Phaser','Chorus','Tremolo','RingModulator','Delay','Convolver','Compressor'] as const;
 
 // Filter type options for Filter effect
 export const FILTER_TYPES = ['lowpass', 'highpass', 'bandpass', 'lowshelf', 'highshelf', 'peaking', 'notch', 'allpass'] as const;
@@ -62,7 +62,7 @@ export function useParamRanges(): Record<string, { min: number; max: number; ste
     // Overdrive params
     outputGain: { min: -42, max: 0, step: 0.33 * midiCCScaler },
     drive: { min: 0, max: 1, step: 0.0079 * midiCCScaler },
-    curveAmount: { min: 0, max: 1, step: 0.0079 * midiCCScaler },
+    curve: { min: 0, max: 1, step: 0.0079 * midiCCScaler },
     algorithmIndex: { min: 0, max: 5, step: 1 },
     // RingModulator params
     // frequency parameter uses shared 'frequency' key
@@ -315,8 +315,8 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
       next[33] = { assignedCC: 34, assignedNote: null, targets: [{ effectId: overdriveEffect.id, paramKey: 'outputGain' }], actionTarget: null, panPresetId: null };
       // Param 35 (index 34) -> CC 35 -> drive
       next[34] = { assignedCC: 35, assignedNote: null, targets: [{ effectId: overdriveEffect.id, paramKey: 'drive' }], actionTarget: null, panPresetId: null };
-      // Param 36 (index 35) -> CC 36 -> curveAmount
-      next[35] = { assignedCC: 36, assignedNote: null, targets: [{ effectId: overdriveEffect.id, paramKey: 'curveAmount' }], actionTarget: null, panPresetId: null };
+      // Param 36 (index 35) -> CC 36 -> curve
+      next[35] = { assignedCC: 36, assignedNote: null, targets: [{ effectId: overdriveEffect.id, paramKey: 'curve' }], actionTarget: null, panPresetId: null };
     }
     
     setMappings(next);

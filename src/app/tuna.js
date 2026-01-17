@@ -1268,7 +1268,7 @@ Tuna.prototype.MoogFilter.prototype = Object.create(Super, {
  * @param {Object} [properties]
  * @param {number} [properties.outputGain=1]
  * @param {number} [properties.drive=0.19]
- * @param {number} [properties.curveAmount=0.7236]
+ * @param {number} [properties.curve=0.7236]
  * @param {number} [properties.algorithmIndex=0]
  * @param {boolean} [properties.bypass=false]
  */
@@ -1291,7 +1291,7 @@ Tuna.prototype.Overdrive = function (properties) {
     this.ws_table = new Float32Array(this.k_nSamples);
     this.drive = initValue(properties.drive, this.defaults.drive.value);
     this.outputGain = initValue(properties.outputGain, this.defaults.outputGain.value);
-    this.curveAmount = initValue(properties.curveAmount, this.defaults.curveAmount.value);
+    this.curve = initValue(properties.curve, this.defaults.curve.value);
     this.algorithmIndex = initValue(properties.algorithmIndex, this.defaults.algorithmIndex.value);
     this.bypass = properties.bypass || this.defaults.bypass.value;
 };
@@ -1318,7 +1318,7 @@ Tuna.prototype.Overdrive.prototype = Object.create(Super, {
                 type: FLOAT,
                 scaled: true
             },
-            curveAmount: {
+            curve: {
                 value: 0.979,
                 min: 0,
                 max: 1,
@@ -1350,7 +1350,7 @@ Tuna.prototype.Overdrive.prototype = Object.create(Super, {
             this.inputDrive.gain.value = value;
         }
     },
-    curveAmount: {
+    curve: {
         get: function () {
             return this._curveAmount;
         },
@@ -1378,7 +1378,7 @@ Tuna.prototype.Overdrive.prototype = Object.create(Super, {
         },
         set: function (value) {
             this._algorithmIndex = value;
-            this.curveAmount = this._curveAmount;
+            this.curve = this._curveAmount;
         }
     },
     waveshaperAlgorithms: {

@@ -303,55 +303,9 @@ export default function TriangleMixer({ voices, onMixChange, onToggleVoice, isAu
   };
 
   return (
-    <div className="flex flex-col items-center">
-      <canvas
-        ref={canvasRef}
-        width={size}
-        height={size}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        className="cursor-pointer border rounded"
-        style={{ touchAction: "none" }}
-      />
-      <div className="mt-2 text-xs text-gray-600 text-center">
-        {isAnimating ? 'Auto-crossfade active' : 'Drag the dot to adjust voice mix'}
-      </div>
-      
-      {/* Auto-crossfade controls */}
-      <div className="mt-3 w-full max-w-[300px] p-2 border rounded bg-gray-50">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-medium">Auto-Crossfade</span>
-          <button
-            onClick={toggleAnimation}
-            className={`text-xs px-3 py-1 rounded font-medium transition-colors ${
-              isAnimating 
-                ? 'bg-red-500 text-white hover:bg-red-600' 
-                : 'bg-blue-500 text-white hover:bg-blue-600'
-            }`}
-          >
-            {isAnimating ? '⏸ Stop' : '▶ Start'}
-          </button>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-600 whitespace-nowrap">Duration:</label>
-          <input
-            type="range"
-            min="2"
-            max="300"
-            step="1"
-            value={rotationDuration}
-            onChange={(e) => setRotationDuration(Number(e.target.value))}
-            className="flex-1"
-            disabled={isAnimating}
-          />
-          <span className="text-xs font-medium w-8 text-right">{rotationDuration}s</span>
-        </div>
-      </div>
-      
-      {/* Voice enable/disable toggles */}
-      <div className="mt-3 w-full max-w-[300px] p-2 border rounded bg-gray-50">
+    <div className="flex gap-4 items-start">
+      {/* Voice selector - left side vertical box */}
+      <div className="p-2 border rounded bg-gray-50 h-fit">
         <div className="text-xs font-medium mb-2">Voice Selector {isAudioPlaying && <span className="text-orange-500">(Locked during playback)</span>}</div>
         <div className="space-y-1">
           {voices.map((voice) => (
@@ -371,18 +325,67 @@ export default function TriangleMixer({ voices, onMixChange, onToggleVoice, isAu
         </div>
       </div>
       
-      {/* Show current mix percentages */}
-      <div className="mt-2 flex gap-3 text-xs flex-wrap justify-center">
-        {voices.filter(v => v.enabled && v.elevenLabsVoiceId).map((voice, idx) => {
-          const mix = calculateMix(position.x, position.y);
-          const percentage = Math.round((mix[voice.id] || 0) * 100);
-          const colors = ["text-red-600", "text-blue-600", "text-green-600", "text-yellow-600", "text-purple-600", "text-pink-600"];
-          return (
-            <div key={voice.id} className={colors[idx % colors.length]}>
-              {voice.name}: <strong>{percentage}%</strong>
-            </div>
-          );
-        })}
+      {/* Mixer and controls - right side */}
+      <div className="flex flex-col items-center">
+        <canvas
+          ref={canvasRef}
+          width={size}
+          height={size}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          className="cursor-pointer border rounded"
+          style={{ touchAction: "none" }}
+        />
+        <div className="mt-2 text-xs text-gray-600 text-center">
+          {isAnimating ? 'Auto-crossfade active' : 'Drag the dot to adjust voice mix'}
+        </div>
+        
+        {/* Auto-crossfade controls */}
+        <div className="mt-3 w-full max-w-[300px] p-2 border rounded bg-gray-50">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium">Auto-Crossfade</span>
+            <button
+              onClick={toggleAnimation}
+              className={`text-xs px-3 py-1 rounded font-medium transition-colors ${
+                isAnimating 
+                  ? 'bg-red-500 text-white hover:bg-red-600' 
+                  : 'bg-blue-500 text-white hover:bg-blue-600'
+              }`}
+            >
+              {isAnimating ? '⏸ Stop' : '▶ Start'}
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-600 whitespace-nowrap">Duration:</label>
+            <input
+              type="range"
+              min="2"
+              max="300"
+              step="1"
+              value={rotationDuration}
+              onChange={(e) => setRotationDuration(Number(e.target.value))}
+              className="flex-1"
+              disabled={isAnimating}
+            />
+            <span className="text-xs font-medium w-8 text-right">{rotationDuration}s</span>
+          </div>
+        </div>
+        
+        {/* Show current mix percentages */}
+        <div className="mt-2 flex gap-3 text-xs flex-wrap justify-center">
+          {voices.filter(v => v.enabled && v.elevenLabsVoiceId).map((voice, idx) => {
+            const mix = calculateMix(position.x, position.y);
+            const percentage = Math.round((mix[voice.id] || 0) * 100);
+            const colors = ["text-red-600", "text-blue-600", "text-green-600", "text-yellow-600", "text-purple-600", "text-pink-600"];
+            return (
+              <div key={voice.id} className={colors[idx % colors.length]}>
+                {voice.name}: <strong>{percentage}%</strong>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

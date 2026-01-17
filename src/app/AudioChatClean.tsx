@@ -1424,11 +1424,11 @@ export default function AudioChatClean() {
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-6 p-8">
+    <div className="min-h-screen flex flex-col items-center justify-center gap-6 p-0">
       {/* Hidden audio element for TTS playback */}
       <audio ref={audioRef} style={{ display: 'none' }} />
-      <div className="w-full max-w-6xl flex flex-col md:flex-row items-start gap-6">
-        <div className="flex-1 max-w-xl bg-white p-4 rounded shadow">
+      <div className="w-full flex flex-col md:flex-row items-start gap-6">
+        <div className="max-w-md bg-white p-4 rounded shadow">
           <div className="flex gap-2 mb-2">
             <button
               onClick={micMuted ? unmuteMic : muteMic}
@@ -1469,29 +1469,7 @@ export default function AudioChatClean() {
             </div>
           </div>
           <div className="mt-3">
-            <div className="flex items-center justify-between mb-2">
-              <div>
-                <label className="block text-sm font-medium mb-1">Output device</label>
-                <select
-                  value={selectedOutputId}
-                  onChange={async (e) => {
-                    const id = e.target.value;
-                    await applySelectedOutput(id);
-                  }}
-                  onClick={() => refreshAudioOutputs()}
-                  className="p-2 border rounded text-sm mr-2"
-                >
-                  {audioOutputs.length === 0 ? <option value="default">default</option> : null}
-                  {audioOutputs.map((o) => (
-                    <option key={o.deviceId} value={o.deviceId}>{o.label || o.deviceId}</option>
-                  ))}
-                </select>
-                <button onClick={() => refreshAudioOutputs()} className="text-xs text-blue-600 ml-2">Refresh</button>
-                {!supportsSetSinkId ? (
-                  <div className="text-xs text-gray-500 mt-1">Note: Browser may not support per-tab output. Use system output or Chromium.</div>
-                ) : null}
-              </div>
-            </div>
+
             {/* Voice Mixer Section */}
             <div className="mt-3">
               <div className="flex items-center justify-between mb-2">
@@ -1577,6 +1555,29 @@ export default function AudioChatClean() {
                 </div>
               </div>
             </div>
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <label className="block text-sm font-medium mb-1">Output device</label>
+                <select
+                  value={selectedOutputId}
+                  onChange={async (e) => {
+                    const id = e.target.value;
+                    await applySelectedOutput(id);
+                  }}
+                  onClick={() => refreshAudioOutputs()}
+                  className="p-2 border rounded text-sm mr-2"
+                >
+                  {audioOutputs.length === 0 ? <option value="default">default</option> : null}
+                  {audioOutputs.map((o) => (
+                    <option key={o.deviceId} value={o.deviceId}>{o.label || o.deviceId}</option>
+                  ))}
+                </select>
+                <button onClick={() => refreshAudioOutputs()} className="text-xs text-blue-600 ml-2">Refresh</button>
+                {!supportsSetSinkId ? (
+                  <div className="text-xs text-gray-500 mt-1">Note: Browser may not support per-tab output. Use system output or Chromium.</div>
+                ) : null}
+              </div>
+            </div>
             <label className="block text-sm font-medium mb-1">API Password</label>
             <input
               type="password"
@@ -1639,7 +1640,7 @@ export default function AudioChatClean() {
             </div>
           </div>
         </div>
-        <div className="w-full md:w-96">
+        <div className="w-full">
           <div className="bg-white p-4 rounded shadow">
             <div className="flex items-center justify-between">
               <strong className="text-sm">Effects Palette</strong>
@@ -1788,9 +1789,9 @@ export default function AudioChatClean() {
                 </button>
               </div>
             </div>
-            <div className="mt-2 grid grid-cols-2 grid-rows-5 gap-3">
+            <div className="mt-2 grid grid-cols-4 gap-3">
               {effectsList.map((fx, idx) => (
-                <div key={fx.id} className={`p-2 border rounded text-xs ${fx.bypass ? 'bg-gray-50' : 'bg-green-100'}`}>
+                <div key={fx.id} className={`p-3 border rounded text-xs ${fx.bypass ? 'bg-gray-50' : 'bg-green-100'}`}>
                   <div className="flex items-center justify-between">
                     <div className="font-medium">{fx.type}</div>
                     <div className="flex items-center gap-2">
