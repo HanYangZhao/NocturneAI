@@ -285,41 +285,8 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
 
   // On first run, if no mappings assigned, populate sensible defaults from AudioFX effects
   useEffect(() => {
-    // if any assigned (excluding action slots 36-37), skip
-    if (mappings.slice(0, 36).some((s) => s.assignedCC !== null || (s.targets && s.targets.length > 0))) return;
-    const effects = AudioFX.getEffects();
-    if (!effects || effects.length === 0) return;
-    // build list of candidate targets: [{effectId,paramKey}]
-    // First, add bypass for each effect, then add numeric params
-    const candidates: Array<{ effectId: string; paramKey: string }> = [];
-    for (const eff of effects) {
-      // Add bypass first for each effect
-      candidates.push({ effectId: eff.id, paramKey: 'bypass' });
-      // Then add numeric params
-      const keys = Object.keys(eff.params || {}).filter(k => typeof (eff.params || {})[k] === 'number');
-      for (const k of keys) {
-        candidates.push({ effectId: eff.id, paramKey: k });
-      }
-    }
-    if (candidates.length === 0) return;
-    const next = mappings.slice();
-    for (let i = 0; i < 36 && i < candidates.length; i++) { // Only assign first 36 slots
-      // assign a default CC number from 1-36
-      next[i] = { assignedCC: i + 1, assignedNote: null, targets: [candidates[i]], actionTarget: null, panPresetId: null };
-    }
-    
-    // Special mappings: Params 34-36 (CC 34-36) for Overdrive effect
-    const overdriveEffect = effects.find((e: any) => e.type === 'Overdrive');
-    if (overdriveEffect) {
-      // Param 34 (index 33) -> CC 34 -> outputGain
-      next[33] = { assignedCC: 34, assignedNote: null, targets: [{ effectId: overdriveEffect.id, paramKey: 'outputGain' }], actionTarget: null, panPresetId: null };
-      // Param 35 (index 34) -> CC 35 -> drive
-      next[34] = { assignedCC: 35, assignedNote: null, targets: [{ effectId: overdriveEffect.id, paramKey: 'drive' }], actionTarget: null, panPresetId: null };
-      // Param 36 (index 35) -> CC 36 -> curve
-      next[35] = { assignedCC: 36, assignedNote: null, targets: [{ effectId: overdriveEffect.id, paramKey: 'curve' }], actionTarget: null, panPresetId: null };
-    }
-    
-    setMappings(next);
+    // Default mappings are disabled - skip initialization
+    return;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
