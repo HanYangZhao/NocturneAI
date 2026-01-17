@@ -2,24 +2,21 @@
   "voices": [
     {
       "id": "voice1",
-      "name": "Han",
-      "elevenLabsVoiceId": "SrApIuGLex4qh7iizlzV",
-      "defaultVolume": 0.3,
-      "enabled": true
+      "name": "Tong",
+      "elevenLabsVoiceId": "BEiMVLCh6NxDoopTP3Zl",
+      "defaultVolume": 0.3
     },
     {
       "id": "voice2",
-      "name": "Matthias",
-      "elevenLabsVoiceId": "12LE1OK706fyUsxFuuk6",
-      "defaultVolume": 0.3,
-      "enabled": true
+      "name": "Han",
+      "elevenLabsVoiceId": "1jflr1iAbc8MoncscUXO",
+      "defaultVolume": 0.3
     },
     {
       "id": "voice3",
       "name": "Matthias",
-      "elevenLabsVoiceId": "12LE1OK706fyUsxFuuk6",
-      "defaultVolume": 0.3,
-      "enabled": false
+      "elevenLabsVoiceId": "H1zPyYJAJzOTWn8mv06N",
+      "defaultVolume": 0.3
     }
   ]
 }
