@@ -120,7 +120,7 @@ export default function AudioChatClean() {
         try { clearMessages(); } catch (e) {}
         try { setIsAudioPlaying(false); } catch (e) {}
         logger.info('[TTS] Audio playback stopped by user');
-        unmuteMic();
+        restoreMicState();
       }
       
       // Play test audio sample through the effect chain
@@ -227,6 +227,8 @@ export default function AudioChatClean() {
   const activeBufferSrcRef = useRef<AudioBufferSourceNode | null>(null);
   // Track when we're playing assistant TTS so we can ignore mic transcripts
   const isPlayingTTSRef = useRef<boolean>(false);
+  // Track mic mute state before TTS so we can restore it after playback
+  const micMutedBeforeTTSRef = useRef<boolean | null>(null);
   // Additional audio routing refs / state
   const graphAudioRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -411,6 +413,19 @@ export default function AudioChatClean() {
     setMicMuted(!unmuted);
   }
 
+  // Restore the mic mute state after TTS playback (respects user's choice before TTS started)
+  function restoreMicState() {
+    if (micMutedBeforeTTSRef.current === true) {
+      // Mic was muted before TTS, so mute it again
+      muteMic();
+    } else if (micMutedBeforeTTSRef.current === false) {
+      // Mic was unmuted before TTS, so unmute it now
+      unmuteMic();
+    }
+    // Clear the stored state
+    micMutedBeforeTTSRef.current = null;
+  }
+
   // Start the brightness analysis loop - analyzes audio after effects and mixer
   function startBrightnessAnalysis() {
     if (!audioContextRef.current || !outDestinationRef.current) {
@@ -525,6 +540,8 @@ export default function AudioChatClean() {
       return;
     }
     try {
+      // Store the mic mute state before we mute it for TTS
+      micMutedBeforeTTSRef.current = micMutedRef.current;
       muteMic();
       // mark that we're playing TTS so STT transcripts can be ignored
       try { isPlayingTTSRef.current = true; } catch (e) {}
@@ -587,7 +604,7 @@ export default function AudioChatClean() {
       const enabledVoices = voicesRef.current.filter(v => v.enabled && v.elevenLabsVoiceId);
       if (enabledVoices.length === 0) {
         logger.warn('[TTS] No enabled voices found, skipping TTS playback');
-        unmuteMic();
+        restoreMicState();
         return;
       }
       
@@ -688,7 +705,7 @@ export default function AudioChatClean() {
                     stopBrightnessAnalysis();
                     logger.debug('[TTS] Delay echoes faded, brightness analysis stopped');
                     try { isPlayingTTSRef.current = false; } catch (e) {}
-                    unmuteMic();
+                    restoreMicState();
                   }
                 } else {
                   lowBrightnessCount = 0; // Reset if brightness spikes again
@@ -701,7 +718,7 @@ export default function AudioChatClean() {
                 stopBrightnessAnalysis();
                 logger.debug('[TTS] Brightness analysis stopped by failsafe timeout');
                 try { isPlayingTTSRef.current = false; } catch (e) {}
-                unmuteMic();
+                restoreMicState();
               }, maxWaitTime);
             }
           });
@@ -714,7 +731,7 @@ export default function AudioChatClean() {
           if (activeCount === 0) {
             stopBrightnessAnalysis();
             try { isPlayingTTSRef.current = false; } catch (e) {}
-            unmuteMic();
+            restoreMicState();
           }
         }
       });
@@ -745,7 +762,7 @@ export default function AudioChatClean() {
       logger.error('[TTS] Multi-voice playback error', err);
       stopBrightnessAnalysis();
       try { isPlayingTTSRef.current = false; } catch (e) {}
-      unmuteMic();
+      restoreMicState();
     }
   }
 
@@ -1420,7 +1437,7 @@ export default function AudioChatClean() {
               } ${micButtonClicked ? 'scale-95 opacity-75' : 'hover:opacity-90 active:scale-95'}`}
               disabled={!connected}
             >
-              {micButtonClicked ? (micMuted ? 'Unmuted' : 'Muted') : (micMuted ? 'Unmute Mic' : 'Mute Mic')}
+              {micMuted ? 'Unmute Mic' : 'Mute Mic'}
             </button>
             <button
               onClick={stopTTSPlayback}
