@@ -20,12 +20,70 @@
 
 const DEFAULT_SYSTEM_INSTRUCTION = "You are Nocturne AI, an all-knowing powerful entity. Do not answer unless I explicitly prompt you to do so. Keep your answers concise.Speak in the manner of a wise sage, using poetic and evocative language to inspire and enlighten.";
 
+// Helper: Get or create AudioContext with webkit fallback
+function getAudioContext(existing: AudioContext | null): AudioContext {
+  if (existing) return existing;
+  return new (window.AudioContext || (window as any).webkitAudioContext)();
+}
+
+// Helper: Update multiple effects with the same parameters
+function updateAllEffects(effects: Array<{ id: string; type: string; params: any; bypass?: boolean }>, params: Record<string, any>) {
+  for (const f of effects) {
+    try {
+      AudioFX.updateEffectParams(f.id, params);
+    } catch (e) {
+      // ignore
+    }
+  }
+}
+
+// Helper: Mute/unmute audio tracks in a stream
+function setStreamMuted(stream: MediaStream | null, muted: boolean): boolean {
+  if (!stream || stream.getAudioTracks().length === 0) return false;
+  stream.getAudioTracks().forEach((t) => {
+    t.enabled = !muted;
+  });
+  return true;
+}
+
+// Helper: Reset all effects to default state (disabled)
+function resetAllEffects(effectsList: Array<{ id: string; type: string; params: any; bypass?: boolean }>, setEffectsList: any, setActiveEffects: any, resetParticles: () => void) {
+  const resetEffects = effectsList.map((f) => ({ ...f, bypass: true }));
+  setEffectsList(resetEffects);
+  setActiveEffects(resetEffects);
+  
+  for (const f of resetEffects) {
+    try { 
+      AudioFX.updateEffectParams(f.id, { bypass: true }); 
+    } catch (e) {}
+  }
+  
+  try {
+    const ParticleFX = require('./particlefx');
+    if (ParticleFX?.clearCachedEffects) {
+      ParticleFX.clearCachedEffects();
+    }
+  } catch (e) {}
+  
+  try {
+    resetParticles();
+  } catch (e) {
+    logger.warn('[AudioChat] Failed to reset particle positions:', e);
+  }
+  
+  logger.info('[AudioChat] All effects reset to default state');
+}
+
 export default function AudioChatClean() {
       // Transcript context for visualizer
-      const { addUserText, addAssistantText, setActiveEffects, textDisplaySpeed, setTextDisplaySpeed, setParticleBrightness, resetParticles, setIsAudioPlaying, clearMessages } = useTranscript();
+      const { addUserText, addAssistantText, setActiveEffects, textDisplaySpeed, setTextDisplaySpeed, setParticleBrightness, resetParticles, setIsAudioPlaying, isAudioPlaying, clearMessages } = useTranscript();
       
       // Stop TTS audio playback
       function stopTTSPlayback() {
+        // Visual feedback
+        setStopButtonClicked(true);
+        setTimeout(() => setStopButtonClicked(false), 300);
+        
         // Stop element-based playback
         if (audioRef.current) {
           try { audioRef.current.pause(); } catch (e) {}
@@ -189,7 +247,17 @@ export default function AudioChatClean() {
   // Audio mixer for multiple voice playback
   const audioMixerRef = useRef<AudioMixer | null>(null);
   const [voiceChannels, setVoiceChannels] = useState<VoiceChannel[]>([]);
-  const [voices] = useState(voicesConfig.voices);
+  const [voices, setVoices] = useState(() => 
+    // Load voices from config and add enabled state (all enabled by default)
+    voicesConfig.voices.map(v => ({ ...v, enabled: true }))
+  );
+  
+  // Toggle voice enabled/disabled state
+  const toggleVoiceEnabled = (voiceId: string) => {
+    setVoices(prev => prev.map(v => 
+      v.id === voiceId ? { ...v, enabled: !v.enabled } : v
+    ));
+  };
 
   // Transient analyzer for particle brightness
   const transientAnalyzerRef = useRef<TransientAnalyzer | null>(null);
@@ -197,6 +265,7 @@ export default function AudioChatClean() {
   const brightnessIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const brightnessRunningRef = useRef<boolean>(false);
   const postEffectsGainRef = useRef<GainNode | null>(null);
+  const voicesRef = useRef(voices);
 
   // Pan presets
   const [panPresets, setPanPresets] = useState<PanPreset[]>(() => {
@@ -222,23 +291,12 @@ export default function AudioChatClean() {
   // Sample audio player state
   const sampleAudioRef = useRef<AudioBufferSourceNode | null>(null);
   const [isPlayingSample, setIsPlayingSample] = useState(false);
-
-  // Per-voice TTS output enable/disable state
-  const [voiceOutputEnabled, setVoiceOutputEnabled] = useState<{ [voiceId: string]: boolean }>(() => {
-    if (typeof window === 'undefined') {
-      return {};
-    }
-    try {
-      const stored = localStorage.getItem('nocturne_voice_output_enabled');
-      if (stored) {
-        return JSON.parse(stored);
-      }
-    } catch (e) {
-      console.warn('Failed to load voice output settings from localStorage', e);
-    }
-    // Default all voices to output enabled
-    return voicesConfig.voices.reduce((acc, v) => ({ ...acc, [v.id]: true }), {});
-  });
+  
+  // Stop button visual feedback state
+  const [stopButtonClicked, setStopButtonClicked] = useState(false);
+  
+  // Mic button visual feedback state
+  const [micButtonClicked, setMicButtonClicked] = useState(false);
 
   // Persist pan presets to localStorage
   useEffect(() => {
@@ -249,19 +307,38 @@ export default function AudioChatClean() {
     }
   }, [panPresets]);
 
-  // Persist voice output settings to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem('nocturne_voice_output_enabled', JSON.stringify(voiceOutputEnabled));
-    } catch (e) {
-      console.warn('Failed to save voice output settings to localStorage', e);
-    }
-  }, [voiceOutputEnabled]);
-
   // Keep micMutedRef in sync with micMuted state
   useEffect(() => {
     micMutedRef.current = micMuted;
   }, [micMuted]);
+
+  // Keep voicesRef in sync with voices state so handlers always see latest values
+  useEffect(() => {
+    voicesRef.current = voices;
+  }, [voices]);
+
+  // Handle removing disabled voices from mixer and cleaning up their channels
+  useEffect(() => {
+    if (!audioMixerRef.current) return;
+    
+    // Get currently enabled voice IDs
+    const enabledVoiceIds = new Set(voices.filter(v => v.enabled).map(v => v.id));
+    
+    // Remove channels for disabled voices
+    const currentChannels = audioMixerRef.current.getChannels();
+    currentChannels.forEach(channel => {
+      if (!enabledVoiceIds.has(channel.id)) {
+        logger.debug('[Mixer] Stopping and removing channel for disabled voice:', channel.id);
+        // Stop playback first
+        audioMixerRef.current?.stopChannel(channel.id);
+        // Then remove the channel
+        audioMixerRef.current?.removeChannel(channel.id);
+      }
+    });
+    
+    // Update voiceChannels state
+    setVoiceChannels(audioMixerRef.current.getChannels());
+  }, [voices]);
 
   function computeChainFromConnections(conns: Array<{ from: string; to: string }>) {
     // build successor map (keep first successor if multiple)
@@ -296,50 +373,38 @@ export default function AudioChatClean() {
   }
 
   function muteMic() {
+    // Visual feedback
+    setMicButtonClicked(true);
+    setTimeout(() => setMicButtonClicked(false), 300);
+    
     // mute both the local stream obtained via getUserMedia and any stream
     // attached inside the Scribe connection (connectionRef.current._microphoneStream)
     let muted = false;
     try {
-      const local = localStreamRef.current;
-      if (local && local.getAudioTracks().length > 0) {
-        local.getAudioTracks().forEach((t) => (t.enabled = false));
-        muted = true;
-      }
+      if (setStreamMuted(localStreamRef.current, true)) muted = true;
     } catch (e) {
       logger.warn('Failed to mute localStreamRef', e);
     }
     try {
-      const micStream = connectionRef.current?._microphoneStream;
-      if (micStream && micStream.getAudioTracks().length > 0) {
-        micStream.getAudioTracks().forEach((track: MediaStreamTrack) => {
-          track.enabled = false;
-        });
-        muted = true;
-      }
+      if (setStreamMuted(connectionRef.current?._microphoneStream ?? null, true)) muted = true;
     } catch (e) {
       logger.warn('Failed to mute connection microphone stream', e);
     }
     setMicMuted(muted);
   }
   function unmuteMic() {
+    // Visual feedback
+    setMicButtonClicked(true);
+    setTimeout(() => setMicButtonClicked(false), 300);
+    
     let unmuted = false;
     try {
-      const local = localStreamRef.current;
-      if (local && local.getAudioTracks().length > 0) {
-        local.getAudioTracks().forEach((t) => (t.enabled = true));
-        unmuted = true;
-      }
+      if (setStreamMuted(localStreamRef.current, false)) unmuted = true;
     } catch (e) {
       logger.warn('Failed to unmute localStreamRef', e);
     }
     try {
-      const micStream = connectionRef.current?._microphoneStream;
-      if (micStream && micStream.getAudioTracks().length > 0) {
-        micStream.getAudioTracks().forEach((track: MediaStreamTrack) => {
-          track.enabled = true;
-        });
-        unmuted = true;
-      }
+      if (setStreamMuted(connectionRef.current?._microphoneStream ?? null, false)) unmuted = true;
     } catch (e) {
       logger.warn('Failed to unmute connection microphone stream', e);
     }
@@ -466,7 +531,7 @@ export default function AudioChatClean() {
       logger.debug('[TTS] Mic muted, preparing multi-voice TTS requests');
       
       const pwHash = await hashPassword(apiPassword || "");
-      const ac = audioContextRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
+      const ac = getAudioContext(audioContextRef.current);
       audioContextRef.current = ac;
       
       // Ensure destination exists
@@ -518,10 +583,11 @@ export default function AudioChatClean() {
         startBrightnessAnalysis();
       }
       
-      // Get all enabled voices that have output enabled
-      const enabledVoices = voices.filter(v => v.enabled && v.elevenLabsVoiceId && voiceOutputEnabled[v.id]);
+      // Get all enabled voices
+      const enabledVoices = voicesRef.current.filter(v => v.enabled && v.elevenLabsVoiceId);
       if (enabledVoices.length === 0) {
-        logger.warn('[TTS] No enabled voices with output available, skipping TTS');
+        logger.warn('[TTS] No enabled voices found, skipping TTS playback');
+        unmuteMic();
         return;
       }
       
@@ -693,7 +759,7 @@ export default function AudioChatClean() {
     // initialize default effects once audioContext available
     (async () => {
       try {
-        const ac = audioContextRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
+        const ac = getAudioContext(audioContextRef.current);
         audioContextRef.current = ac;
         AudioFX.initTuna(ac);
         // create default effects (start bypassed)
@@ -990,7 +1056,7 @@ export default function AudioChatClean() {
 
     dc.addEventListener("message", (ev: MessageEvent) => {
       const raw = ev.data;
-      logger.debug("OpenAI DC raw message:", raw);
+      logger.debug("w message:", raw);
       try {
         const msg = JSON.parse(String(raw));
         logger.debug("OpenAI DC parsed message type:", msg.type);
@@ -1240,8 +1306,6 @@ export default function AudioChatClean() {
     // Send to visualizer (partial while streaming, final when done)
     addAssistantText(next, !done);
     // If done, push to transcript history and play TTS
-    logger.debug(done)
-    logger.debug(next.trim())
     if (done && next.trim()) {
       setTranscriptHistory((h) => [...h, { role: "assistant", text: next.trim() }]);
     }
@@ -1351,17 +1415,21 @@ export default function AudioChatClean() {
           <div className="flex gap-2 mb-2">
             <button
               onClick={micMuted ? unmuteMic : muteMic}
-              className={`px-3 py-1 rounded ${micMuted ? 'bg-gray-400 text-white' : 'bg-blue-600 text-white'}`}
+              className={`px-3 py-1 rounded text-white transition-all duration-300 ${
+                micMuted ? 'bg-gray-400' : 'bg-blue-600'
+              } ${micButtonClicked ? 'scale-95 opacity-75' : 'hover:opacity-90 active:scale-95'}`}
               disabled={!connected}
             >
-              {micMuted ? 'Unmute Mic' : 'Mute Mic'}
+              {micButtonClicked ? (micMuted ? 'Unmuted' : 'Muted') : (micMuted ? 'Unmute Mic' : 'Mute Mic')}
             </button>
             <button
               onClick={stopTTSPlayback}
-              className="px-3 py-1 rounded bg-red-400 text-white"
-              disabled={!isPlayingTTSRef.current}
+              className={`px-3 py-1 rounded bg-red-400 text-white transition-all duration-300 ${
+                stopButtonClicked ? 'scale-95 opacity-75' : 'hover:bg-red-500 active:scale-95'
+              }`}
+              disabled={!isAudioPlaying}
             >
-              Stop Audio
+              {stopButtonClicked ? 'Stopped' : 'Stop Audio'}
             </button>
             <span className={`text-sm ${micMuted ? 'text-red-600' : 'text-green-600'}`}>{micMuted ? 'Mic is muted' : 'Mic is live'}</span>
           </div>
@@ -1425,7 +1493,7 @@ export default function AudioChatClean() {
               <div className="p-3 border rounded bg-gray-50">
                 <TriangleMixer
                   voices={voices}
-                  voiceOutputEnabled={voiceOutputEnabled}
+                  isAudioPlaying={isAudioPlaying}
                   onMixChange={(mix) => {
                     // Update mixer volumes based on 2D control
                     if (audioMixerRef.current) {
@@ -1435,36 +1503,12 @@ export default function AudioChatClean() {
                       setVoiceChannels(audioMixerRef.current.getChannels());
                     }
                   }}
+                  onToggleVoice={toggleVoiceEnabled}
                 />
                 {voices.filter(v => v.enabled && v.elevenLabsVoiceId).length === 0 && (
                   <div className="text-xs text-gray-500 text-center py-2 mt-2">
                     Configure voices in src/app/voices.json
                   </div>
-                )}
-              </div>
-            </div>
-            {/* Per-voice TTS output controls */}
-            <div className="mt-3 p-3 border rounded bg-gray-50">
-              <label className="block text-sm font-medium mb-2">Output Voices</label>
-              <div className="flex flex-col gap-2">
-                {voices.filter(v => v.enabled && v.elevenLabsVoiceId).map(voice => (
-                  <label key={voice.id} className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={voiceOutputEnabled[voice.id] !== false}
-                      onChange={(e) => {
-                        setVoiceOutputEnabled(prev => ({
-                          ...prev,
-                          [voice.id]: e.target.checked
-                        }));
-                      }}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-sm">{voice.name}</span>
-                  </label>
-                ))}
-                {voices.filter(v => v.enabled && v.elevenLabsVoiceId).length === 0 && (
-                  <div className="text-xs text-gray-500">No output voices configured</div>
                 )}
               </div>
             </div>
@@ -1597,10 +1641,7 @@ export default function AudioChatClean() {
                     const next = effectsList.map((f) => ({ ...f, bypass: setTo }));
                     setEffectsList(next);
                     setActiveEffects(next); // Sync to visualizer
-                    // apply to audiofx
-                    for (const f of next) {
-                      try { AudioFX.updateEffectParams(f.id, { bypass: setTo }); } catch (e) {}
-                    }
+                    updateAllEffects(next, { bypass: setTo });
                   }}
                   className="text-xs px-2 py-1 border rounded"
                 >
@@ -1615,17 +1656,13 @@ export default function AudioChatClean() {
                       const next = effectsList.map((f) => ({ ...f, bypass: true }));
                       setEffectsList(next);
                       setActiveEffects(next);
-                      for (const f of next) {
-                        try { AudioFX.updateEffectParams(f.id, { bypass: true }); } catch (e) {}
-                      }
+                      updateAllEffects(next, { bypass: true });
                     } else {
                       // Connecting: restore previous state
                       const next = previousEffectsRef.current.length > 0 ? previousEffectsRef.current : effectsList;
                       setEffectsList(next);
                       setActiveEffects(next);
-                      for (const f of next) {
-                        try { AudioFX.updateEffectParams(f.id, { bypass: f.bypass }); } catch (e) {}
-                      }
+                      updateAllEffects(next, {});
                     }
                     setParticleFxConnected(!particleFxConnected);
                   }}
@@ -1639,37 +1676,7 @@ export default function AudioChatClean() {
                 </button>
                 {/** Reset Particle FX to original state */}
                 <button
-                  onClick={() => {
-                    // Reset both particle FX and audio effects to default state
-                    // Disable all audio effects
-                    const resetEffects = effectsList.map((f) => ({ ...f, bypass: true }));
-                    setEffectsList(resetEffects);
-                    setActiveEffects(resetEffects);
-                    
-                    // Clear all audio effect parameters in the system
-                    for (const f of resetEffects) {
-                      try { 
-                        AudioFX.updateEffectParams(f.id, { bypass: true }); 
-                      } catch (e) {}
-                    }
-                    
-                    // Clear particle FX cache to reset visual effects
-                    try {
-                      const ParticleFX = require('./particlefx');
-                      if (ParticleFX?.clearCachedEffects) {
-                        ParticleFX.clearCachedEffects();
-                      }
-                    } catch (e) {}
-                    
-                    // Reset particle positions to original layout
-                    try {
-                      resetParticles();
-                    } catch (e) {
-                      logger.warn('[AudioChat] Failed to reset particle positions:', e);
-                    }
-                    
-                    logger.info('[AudioChat] All effects reset to default state');
-                  }}
+                  onClick={() => resetAllEffects(effectsList, setEffectsList, setActiveEffects, resetParticles)}
                   className="text-xs px-2 py-1 border rounded bg-yellow-100 hover:bg-yellow-200"
                 >
                   Reset All FX
@@ -1892,35 +1899,7 @@ export default function AudioChatClean() {
                               muteMic();
                             }
                           } else if (action === 'resetAllFX') {
-                            // Reset both particle FX and audio effects to default state
-                            // Disable all audio effects
-                            const resetEffects = effectsList.map((f) => ({ ...f, bypass: true }));
-                            setEffectsList(resetEffects);
-                            setActiveEffects(resetEffects);
-                            
-                            // Clear all audio effect parameters in the system
-                            for (const f of resetEffects) {
-                              try { 
-                                AudioFX.updateEffectParams(f.id, { bypass: true }); 
-                              } catch (e) {}
-                            }
-                            
-                            // Clear particle FX cache to reset visual effects
-                            try {
-                              const ParticleFX = require('./particlefx');
-                              if (ParticleFX?.clearCachedEffects) {
-                                ParticleFX.clearCachedEffects();
-                              }
-                            } catch (e) {}
-                            
-                            // Reset particle positions to original layout
-                            try {
-                              resetParticles();
-                            } catch (e) {
-                              logger.warn('[AudioChat] Failed to reset particle positions:', e);
-                            }
-                            
-                            logger.info('[AudioChat] All effects reset to default state via MIDI');
+                            resetAllEffects(effectsList, setEffectsList, setActiveEffects, resetParticles);
                           }
                         } catch (e) {
                           logger.warn('[MIDI] Failed to execute button action', action, e);

@@ -9,8 +9,9 @@ interface TriangleMixerProps {
     enabled: boolean;
     elevenLabsVoiceId?: string;
   }>;
-  voiceOutputEnabled?: { [voiceId: string]: boolean };
   onMixChange: (mix: { [voiceId: string]: number }) => void;
+  onToggleVoice?: (voiceId: string) => void;
+  isAudioPlaying?: boolean;
 }
 
 /**
@@ -18,7 +19,7 @@ interface TriangleMixerProps {
  * Place a dot in the circle to control the mix of all enabled voices
  * Center = equal mix, edges favor individual voices
  */
-export default function TriangleMixer({ voices, voiceOutputEnabled, onMixChange }: TriangleMixerProps) {
+export default function TriangleMixer({ voices, onMixChange, onToggleVoice, isAudioPlaying }: TriangleMixerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [position, setPosition] = useState({ x: 0.5, y: 0.5 }); // Normalized 0-1
@@ -33,7 +34,7 @@ export default function TriangleMixer({ voices, voiceOutputEnabled, onMixChange 
 
   // Calculate voice volumes based on position using barycentric-like coordinates
   const calculateMix = (x: number, y: number): { [key: string]: number } => {
-    const enabledVoices = voices.filter(v => v.enabled && v.elevenLabsVoiceId && voiceOutputEnabled?.[v.id] !== false);
+    const enabledVoices = voices.filter(v => v.enabled && v.elevenLabsVoiceId);
     const numVoices = enabledVoices.length;
     
     if (numVoices === 0) return {};
@@ -108,7 +109,7 @@ export default function TriangleMixer({ voices, voiceOutputEnabled, onMixChange 
     // Draw three sections with subtle shading
     const voice1Angle = 0;
     const voice2Angle = (2 * Math.PI) / 3;
-    const enabledVoices = voices.filter(v => v.enabled && v.elevenLabsVoiceId && voiceOutputEnabled?.[v.id] !== false);
+    const enabledVoices = voices.filter(v => v.enabled && v.elevenLabsVoiceId);
     const numVoices = enabledVoices.length;
     
     if (numVoices === 0) return;
@@ -199,7 +200,7 @@ export default function TriangleMixer({ voices, voiceOutputEnabled, onMixChange 
     ctx.lineWidth = 2;
     ctx.stroke();
     
-  }, [position, voices, voiceOutputEnabled, center.x, center.y, radius, size]);
+  }, [position, voices, center.x, center.y, radius, size]);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     setIsDragging(true);
@@ -346,6 +347,27 @@ export default function TriangleMixer({ voices, voiceOutputEnabled, onMixChange 
             disabled={isAnimating}
           />
           <span className="text-xs font-medium w-8 text-right">{rotationDuration}s</span>
+        </div>
+      </div>
+      
+      {/* Voice enable/disable toggles */}
+      <div className="mt-3 w-full max-w-[300px] p-2 border rounded bg-gray-50">
+        <div className="text-xs font-medium mb-2">Voice Selector {isAudioPlaying && <span className="text-orange-500">(Locked during playback)</span>}</div>
+        <div className="space-y-1">
+          {voices.map((voice) => (
+            <label key={voice.id} className={`flex items-center gap-2 text-xs ${isAudioPlaying ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-gray-100'} p-1 rounded`}>
+              <input
+                type="checkbox"
+                checked={voice.enabled}
+                onChange={() => onToggleVoice?.(voice.id)}
+                disabled={isAudioPlaying}
+                className="w-3 h-3"
+              />
+              <span className={voice.enabled ? 'text-gray-900 font-medium' : 'text-gray-400 line-through'}>
+                {voice.name}
+              </span>
+            </label>
+          ))}
         </div>
       </div>
       
