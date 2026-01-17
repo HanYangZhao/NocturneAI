@@ -58,6 +58,9 @@ export default function AudioChatClean() {
         // Stop brightness analysis
         stopBrightnessAnalysis();
         try { isPlayingTTSRef.current = false; } catch (e) {}
+        // Clear visualizer text and reset to idle state
+        try { clearMessages(); } catch (e) {}
+        try { setIsAudioPlaying(false); } catch (e) {}
         logger.info('[TTS] Audio playback stopped by user');
         unmuteMic();
       }
@@ -150,6 +153,9 @@ export default function AudioChatClean() {
           }
           stopBrightnessAnalysis();
           setIsPlayingSample(false);
+          // Clear visualizer text and reset to idle state
+          try { clearMessages(); } catch (e) {}
+          try { setIsAudioPlaying(false); } catch (e) {}
           logger.debug('[Sample] Sample playback stopped');
         } catch (e) {
           logger.warn('[Sample] Error stopping sample:', e);
@@ -735,6 +741,7 @@ export default function AudioChatClean() {
   const [oaiStatus, setOaiStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [transcript, setTranscript] = useState("");
   const [partialTranscript, setPartialTranscript] = useState("");
+  const [isWaitingForAIResponse, setIsWaitingForAIResponse] = useState(false);
   // Store transcript history as array of { role, text }
   const [transcriptHistory, setTranscriptHistory] = useState<{ role: "user" | "assistant"; text: string }[]>([]);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -806,6 +813,11 @@ export default function AudioChatClean() {
         logger.error("Scribe error:", err);
       });
       connection.on(RealtimeEvents.PARTIAL_TRANSCRIPT, (data: unknown) => {
+        // Don't process partial transcripts while waiting for AI response
+        if (isWaitingForAIResponse) {
+          logger.debug('Ignoring partial transcript while waiting for AI response');
+          return;
+        }
         if (typeof data === 'object' && data !== null && 'text' in data) {
           const d = data as { text?: unknown };
           if (typeof d.text === 'string') {
@@ -826,12 +838,19 @@ export default function AudioChatClean() {
           logger.debug('Ignoring committed transcript while TTS is playing:', text);
           return;
         }
+        // Don't process new committed transcripts while waiting for previous AI response
+        if (isWaitingForAIResponse) {
+          logger.debug('Ignoring committed transcript while waiting for AI response:', text);
+          return;
+        }
         if (text) {
           setTranscript(text ?? "");
           setPartialTranscript("");
           setTranscriptHistory((h) => [...h, { role: "user", text }]);
           addUserText(text, false); // Send committed transcript to visualizer
           logger.info("Committed transcript:", text);
+          // Mark that we're waiting for AI response - don't listen for new transcripts until we get a response
+          setIsWaitingForAIResponse(true);
           if (text) await sendTextToOpenAI(text);
         }
       });
@@ -965,6 +984,8 @@ export default function AudioChatClean() {
           if (finalResponse) {
             playAssistantTTS(finalResponse);
           }
+          // Resume listening for new user input
+          setIsWaitingForAIResponse(false);
           // clear assistant output after a short delay so the UI resets for next response
           setTimeout(() => {
             assistantResponseRef.current = "";
@@ -1312,7 +1333,7 @@ export default function AudioChatClean() {
             <button
               onClick={stopTTSPlayback}
               className="px-3 py-1 rounded bg-red-400 text-white"
-              disabled={!connected}
+              disabled={!isPlayingTTSRef.current}
             >
               Stop Audio
             </button>
