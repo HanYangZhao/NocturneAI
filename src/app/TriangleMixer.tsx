@@ -32,6 +32,23 @@ export default function TriangleMixer({ voices, onMixChange, onToggleVoice, isAu
   const radius = size / 2;
   const center = { x: radius, y: radius };
 
+  // Handle device pixel ratio for proper canvas rendering
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.scale(dpr, dpr);
+    }
+  }, [size]);
+
   // Calculate voice volumes based on position using barycentric-like coordinates
   const calculateMix = (x: number, y: number): { [key: string]: number } => {
     const enabledVoices = voices.filter(v => v.enabled && v.elevenLabsVoiceId);
@@ -329,14 +346,12 @@ export default function TriangleMixer({ voices, onMixChange, onToggleVoice, isAu
       <div className="flex flex-col items-center">
         <canvas
           ref={canvasRef}
-          width={size}
-          height={size}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
           className="cursor-pointer border rounded"
-          style={{ touchAction: "none" }}
+          style={{ touchAction: "none", width: `${size}px`, height: `${size}px` }}
         />
         <div className="mt-2 text-xs text-gray-600 text-center">
           {isAnimating ? 'Auto-crossfade active' : 'Drag the dot to adjust voice mix'}
