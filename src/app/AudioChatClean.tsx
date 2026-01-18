@@ -1577,13 +1577,14 @@ export default function AudioChatClean() {
                         <div className="w-full text-xs">
                           <div className="font-medium mb-2">Voice Settings</div>
                           <label className="block mb-1">Stability <span className="text-[11px] text-gray-500">(0-1)</span></label>
-                          <input className="w-full" type="range" min={0} max={1} step={0.01} value={voiceSettings.stability} onChange={(e)=> setVoiceSettings(s => ({ ...s, stability: Number(e.target.value) }))} />
+                          <input title="Determines how stable the voice is and the randomness between each generation. Lower values introduce broader emotional range for the voice. Higher values can result in a monotonous voice with limited emotion." className="w-full" type="range" min={0} max={1} step={0.01} value={voiceSettings.stability} onChange={(e)=> setVoiceSettings(s => ({ ...s, stability: Number(e.target.value) }))} />
                           <div className="text-right text-[11px] text-gray-600">{voiceSettings.stability.toFixed(2)}</div>
 
                           <label className="block mt-2 mb-1 flex items-center justify-between">
                             <span>Speaker Boost</span>
                             <label className="inline-flex items-center text-[11px]">
                               <input
+                                title="This setting boosts the similarity to the original speaker. Using this setting requires a slightly higher computational load, which in turn increases latency."
                                 type="checkbox"
                                 className="mr-2"
                                 checked={voiceSettings.useSpeakerBoost}
@@ -1596,11 +1597,11 @@ export default function AudioChatClean() {
                           </label>
 
                           <label className="block mt-2 mb-1">Similarity Boost <span className="text-[11px] text-gray-500">(0-1)</span></label>
-                          <input className="w-full" type="range" min={0} max={1} step={0.01} value={voiceSettings.similarityBoost} onChange={(e)=> setVoiceSettings(s => ({ ...s, similarityBoost: Number(e.target.value) }))} />
+                          <input title="Determines how closely the AI should adhere to the original voice when attempting to replicate it." className="w-full" type="range" min={0} max={1} step={0.01} value={voiceSettings.similarityBoost} onChange={(e)=> setVoiceSettings(s => ({ ...s, similarityBoost: Number(e.target.value) }))} />
                           <div className="text-right text-[11px] text-gray-600">{voiceSettings.similarityBoost.toFixed(2)}</div>
 
                           <label className="block mt-2 mb-1">Style <span className="text-[11px] text-gray-500">(0-1)</span></label>
-                          <input className="w-full" type="range" min={0} max={1} step={0.1} value={voiceSettings.style} onChange={(e)=> setVoiceSettings(s => ({ ...s, style: Number(e.target.value) }))} />
+                          <input title="Determines the style exaggeration of the voice. This attempts to amplify the style of the original speaker; it consumes additional computational resources and may increase latency if set to anything other than 0." className="w-full" type="range" min={0} max={1} step={0.1} value={voiceSettings.style} onChange={(e)=> setVoiceSettings(s => ({ ...s, style: Number(e.target.value) }))} />
                           <div className="text-right text-[11px] text-gray-600">{voiceSettings.style}</div>
 
                           <label className="block mt-2 mb-1">Speed <span className="text-[11px] text-gray-500">(0.7-1.2)</span></label>
