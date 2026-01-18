@@ -278,7 +278,7 @@ export default function AudioChatClean() {
     similarity_boost: number;
     style: number;
     speed: number;
-  }>(() => ({ stability: 0.4, use_speaker_boost: true, similarity_boost: 1, style: 1, speed: 0.5 }));
+  }>(() => ({ stability: 0.4, use_speaker_boost: false, similarity_boost: 1, style: 1, speed: 0.5 }));
 
   // Debug: log when voiceSettings change to detect stale/duplicate component instances
   useEffect(() => {
@@ -940,7 +940,7 @@ export default function AudioChatClean() {
         languageCode: "en",
         commitStrategy: CommitStrategy.VAD,
         vadSilenceThresholdSecs: 1.5,
-        vadThreshold: 0.7,
+        vadThreshold: 0.8,
         minSpeechDurationMs: 500,
         minSilenceDurationMs: 500,
         includeTimestamps: false,
