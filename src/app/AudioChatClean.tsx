@@ -1525,7 +1525,7 @@ export default function AudioChatClean() {
             <span className={`text-sm ${micMuted ? 'text-red-600' : 'text-green-600'}`}>{micMuted ? 'Mic is muted' : 'Mic is live'}</span>
           </div>
           <div className="flex flex-col md:flex-row gap-3 md:items-center">
-            <div className="flex gap-3 items-center">
+              <div className="flex gap-3 items-center">
               <button onClick={startRealtime} disabled={connected || elStatus === 'connecting' || oaiStatus === 'connecting'} className="px-4 py-2 bg-green-600 text-white rounded">Start Session</button>
               <button onClick={stopRealtime} disabled={!connected} className="px-4 py-2 bg-red-500 text-white rounded">Stop Session</button>
             </div>
@@ -1534,12 +1534,12 @@ export default function AudioChatClean() {
                 elStatus === 'connected' ? 'text-green-600' :
                 elStatus === 'connecting' ? 'text-yellow-600 animate-pulse' :
                 elStatus === 'error' ? 'text-red-600' : 'text-gray-400'
-              }>ElevenLabs: {elStatus.charAt(0).toUpperCase() + elStatus.slice(1)}</span>
+              }><strong>ElevenLabs:</strong> {elStatus.charAt(0).toUpperCase() + elStatus.slice(1)}</span>
               <span className={
                 oaiStatus === 'connected' ? 'text-green-600' :
                 oaiStatus === 'connecting' ? 'text-yellow-600 animate-pulse' :
                 oaiStatus === 'error' ? 'text-red-600' : 'text-gray-400'
-              }>OpenAI: {oaiStatus.charAt(0).toUpperCase() + oaiStatus.slice(1)}</span>
+              }><strong>OpenAI:</strong> {oaiStatus.charAt(0).toUpperCase() + oaiStatus.slice(1)}</span>
             </div>
           </div>
           <div className="mt-3">
@@ -1547,7 +1547,7 @@ export default function AudioChatClean() {
             {/* Voice Mixer Section */}
             <div className="mt-3">
               <div className="flex items-center justify-between mb-2">
-                <label className="block text-sm font-medium">Voice Mixer (2D Control)</label>
+                <label className="block text-sm font-bold">Voice Mixer (2D Control)</label>
                 <button
                   onClick={isPlayingSample ? stopSampleAudio : playSampleAudio}
                   className={`px-2 py-1 text-xs rounded ${
@@ -1575,7 +1575,7 @@ export default function AudioChatClean() {
                       onToggleVoice={toggleVoiceEnabled}
                       settings={(
                         <div className="w-full text-xs">
-                          <div className="font-medium mb-2">Voice Settings</div>
+                          <div className="font-bold mb-2">Voice Settings</div>
                           <label className="block mb-1">Stability <span className="text-[11px] text-gray-500">(0-1)</span></label>
                           <input title="Determines how stable the voice is and the randomness between each generation. Lower values introduce broader emotional range for the voice. Higher values can result in a monotonous voice with limited emotion." className="w-full" type="range" min={0} max={1} step={0.01} value={voiceSettings.stability} onChange={(e)=> setVoiceSettings(s => ({ ...s, stability: Number(e.target.value) }))} />
                           <div className="text-right text-[11px] text-gray-600">{voiceSettings.stability.toFixed(2)}</div>
@@ -1906,7 +1906,7 @@ export default function AudioChatClean() {
               {effectsList.map((fx, idx) => (
                 <div key={fx.id} className={`p-3 border rounded text-xs ${fx.bypass ? 'bg-gray-50' : 'bg-green-100'}`}>
                   <div className="flex items-center justify-between">
-                    <div className="font-medium">{fx.type}</div>
+                    <div className="font-bold">{fx.type}</div>
                     {fx.type !== 'Volume' ? (
                       <div className="flex items-center gap-2">
                         <label className="text-[11px]">Bypass</label>

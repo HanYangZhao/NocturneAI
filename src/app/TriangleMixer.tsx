@@ -324,7 +324,7 @@ export default function TriangleMixer({ voices, onMixChange, onToggleVoice, isAu
     <div className="flex gap-4 items-start">
       {/* Voice selector - left side vertical box */}
       <div id="triangle-voice-selector" className="p-2 border rounded bg-gray-50 h-fit">
-        <div className="text-xs font-medium mb-2">Voice Selector {isAudioPlaying && <span className="text-orange-500">(Locked during playback)</span>}</div>
+        <div className="text-xs font-bold mb-2">Voice Selector {isAudioPlaying && <span className="text-orange-500">(Locked during playback)</span>}</div>
         <div className="space-y-1">
           {voices.map((voice) => (
             <label key={voice.id} className={`flex items-center gap-2 text-xs ${isAudioPlaying ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-gray-100'} p-1 rounded`}>
