@@ -40,14 +40,14 @@ const defaultParamsByType: Record<string, any> = {
   Delay: { feedback: 0.45, delayTime: 100, wetLevel: 0.5, dryLevel: 1, cutoff: 2000, bypass: false },
   Phaser: { rate: 0.1, depth: 0.6, feedback: 0.7, stereoPhase: 20, baseModFreq: 700, bypass: false },
   Convolver: { highCut: 1000, lowCut: 20, dryLevel: 1, wetLevel: 1, level: 1, impulse: "/LexiconHalls/CUSTOM_dream hall.WAV", bypass: false },
-  Compressor: { threshold: -30, makeupGain: 0.5, attack: 50, release: 100, ratio: 4, knee: 5, automakeup: false, bypass: false },
+  Compressor: { threshold: -48, makeupGain: 0.1, attack: 50, release: 500, ratio: 4, knee: 5, automakeup: false, bypass: false },
   Filter: { frequency: 800, Q: 1, gain: 0, filterType: 'lowpass', bypass: false },
   Tremolo: { intensity: 0.3, rate: 5, stereoPhase: 0, bypass: false },
   Bitcrusher: { bits: 4, normfreq: 0.1, bufferSize: 4096, bypass: false },
   Chorus: { rate: 1.5, feedback: 0.4, depth: 0.7, delay: 0.0045, bypass: false },
   Overdrive: { outputGain: -9.154, drive: 0.197, curve: 0.979, algorithmIndex: 0, bypass: false },
   RingModulator: { frequency: 30, depth: 1, bufferSize: 4096, bypass: false },
-  Volume: { volume: 1 },
+  Volume: { volume: 0.65 },
 };
 
 export function createEffect(id: string, type: string, params?: any) {
