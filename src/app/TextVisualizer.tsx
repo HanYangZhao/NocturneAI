@@ -24,7 +24,7 @@ export default function TextVisualizer() {
   const smokeParticlesOriginalDataRef = useRef<Array<{ scale: number; opacity: number }>>([]);
   const smokeAnimationTimeRef = useRef<number>(0);
   const wasAudioPlayingRef = useRef<boolean>(false);
-  const smokeAnimationDurationRef = useRef<number>(0.7); // 0.5 seconds for expand/contract animation
+  const smokeAnimationDurationRef = useRef<number>(0.3); // 0.3 seconds for expand/contract animation
   const textDisplayDelayRef = useRef<number>(0); // Delay before showing text after audio starts
   const audioStartTimeRef = useRef<number | null>(null); // Track when audio started
   const [displayedText, setDisplayedText] = useState('');
@@ -178,10 +178,11 @@ export default function TextVisualizer() {
       }
       
       // Check if we should start showing text (wait for cloud animation to finish)
-      if (audioStartTimeRef.current) {
+      // Only apply the display delay for assistant text so user partials aren't hidden
+      if (textRole === 'assistant' && audioStartTimeRef.current) {
         const timeSinceAudioStart = Date.now() - audioStartTimeRef.current;
         if (timeSinceAudioStart < textDisplayDelayRef.current) {
-          // Still in the delay period - don't show text yet
+          // Still in the delay period - don't show assistant text yet
           setDisplayedText('');
           return;
         }
