@@ -1041,35 +1041,48 @@ export default function AudioChatClean() {
   }
 
   function stopRealtime() {
+    // Ensure both ElevenLabs (Scribe) and OpenAI realtime connections are cleanly disconnected
     try {
-      const conn = connectionRef.current;
-      if (conn && typeof conn.close === "function") conn.close();
+      // Disconnect ElevenLabs realtime (if present)
+      try {
+        const conn = connectionRef.current;
+        if (conn && typeof conn.close === "function") conn.close();
+      } catch (e) {
+        logger.error('Error disconnecting ElevenLabs connection', e);
+      }
+
+      // Stop and clear any local media tracks
+      if (localStreamRef.current) {
+        try {
+          for (const t of localStreamRef.current.getTracks()) t.stop();
+        } catch (e) {}
+        localStreamRef.current = null;
+      }
+
+      connectionRef.current = null;
+      setConnected(false);
+      setTranscript("");
+      setPartialTranscript("");
+
+      // Disconnect OpenAI realtime (data channel + peer connection)
+      if (dcRef.current && typeof dcRef.current.close === "function") {
+        try { dcRef.current.close(); } catch (e) { logger.warn('Error closing OpenAI data channel', e); }
+      }
+      if (pcRef.current && typeof pcRef.current.close === "function") {
+        try { pcRef.current.close(); } catch (e) { logger.warn('Error closing OpenAI peer connection', e); }
+      }
+      pcRef.current = null;
+      dcRef.current = null;
+      instructionSentRef.current = false;
+
+      // Reset statuses shown in UI
+      try { setElStatus('idle'); } catch (e) {}
+      try { setOaiStatus('idle'); } catch (e) {}
+      // Clear assistant response state
+      try { assistantResponseRef.current = ""; setAssistantResponse(""); } catch (e) {}
     } catch (e) {
       logger.error(e);
     }
-
-    if (localStreamRef.current) {
-      for (const t of localStreamRef.current.getTracks()) t.stop();
-      localStreamRef.current = null;
-    }
-
-    connectionRef.current = null;
-    setConnected(false);
-    setTranscript("");
-    setPartialTranscript("");
-    try {
-      if (dcRef.current && typeof dcRef.current.close === "function") dcRef.current.close();
-    } catch (e) {
-      logger.error("Failed to close data channel", e);
-    }
-    try {
-      if (pcRef.current && typeof pcRef.current.close === "function") pcRef.current.close();
-    } catch (e) {
-      logger.error("Failed to close peer connection", e);
-    }
-    pcRef.current = null;
-    dcRef.current = null;
-    instructionSentRef.current = false;
   }
 
   async function ensureOpenAIConnection() {
