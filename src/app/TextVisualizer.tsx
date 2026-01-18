@@ -171,23 +171,6 @@ export default function TextVisualizer() {
     const updateWindow = () => {
       if (!textStartTimeRef.current) return;
       
-      // For assistant text, don't show until audio is actually playing AND delay period has passed
-      if (textRole === 'assistant' && !isAudioPlayingRef.current) {
-        setDisplayedText('');
-        return;
-      }
-      
-      // Check if we should start showing text (wait for cloud animation to finish)
-      // Only apply the display delay for assistant text so user partials aren't hidden
-      if (textRole === 'assistant' && audioStartTimeRef.current) {
-        const timeSinceAudioStart = Date.now() - audioStartTimeRef.current;
-        if (timeSinceAudioStart < textDisplayDelayRef.current) {
-          // Still in the delay period - don't show assistant text yet
-          setDisplayedText('');
-          return;
-        }
-      }
-      
       const elapsed = Date.now() - textStartTimeRef.current;
       const targetWindow = Math.floor(elapsed / millisecondsPerWindow);
       

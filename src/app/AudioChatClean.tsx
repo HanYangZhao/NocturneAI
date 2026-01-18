@@ -723,7 +723,7 @@ export default function AudioChatClean() {
               // Don't stop brightness immediately - wait for delay echoes to finish
               // Check brightness every 100ms and stop when it's been low for 1000ms (increased from 500ms)
               let lowBrightnessCount = 0;
-              const fadeCheckInterval = setInterval(() => {
+              let fadeCheckInterval: NodeJS.Timeout | null = setInterval(() => {
                 const currentBrightness = Math.max(
                   transientAnalyzerRef.current?.getBrightness() || 0,
                   outputAnalyzerRef.current?.getBrightness() || 0
@@ -732,7 +732,10 @@ export default function AudioChatClean() {
                 if (currentBrightness < 0.05) {
                   lowBrightnessCount++;
                   if (lowBrightnessCount >= 20) { // 2000ms of low brightness (was 500ms)
-                    clearInterval(fadeCheckInterval);
+                    if (fadeCheckInterval) {
+                      clearInterval(fadeCheckInterval);
+                      fadeCheckInterval = null;
+                    }
                     stopBrightnessAnalysis();
                     logger.debug('[TTS] Delay echoes faded, brightness analysis stopped');
                     try { isPlayingTTSRef.current = false; } catch (e) {}
@@ -744,8 +747,11 @@ export default function AudioChatClean() {
               }, 100);
               
               // Failsafe: force stop after calculated timeout
-              setTimeout(() => {
-                clearInterval(fadeCheckInterval);
+              let failsafeTimeout: NodeJS.Timeout | null = setTimeout(() => {
+                if (fadeCheckInterval) {
+                  clearInterval(fadeCheckInterval);
+                  fadeCheckInterval = null;
+                }
                 stopBrightnessAnalysis();
                 logger.debug('[TTS] Brightness analysis stopped by failsafe timeout');
                 try { isPlayingTTSRef.current = false; } catch (e) {}
@@ -1364,11 +1370,15 @@ export default function AudioChatClean() {
 
   // Helper to append assistant response to UI and (optionally) transcript history
   function appendAssistant(text: string, done: boolean = false) {
-    if (!text) return;
-    // avoid exact trailing duplicates
     const cur = assistantResponseRef.current || "";
-    if (cur.endsWith(text)) return;
-    const next = cur + text;
+    
+    // Only skip if there's actual text AND it matches existing
+    if (text && cur.endsWith(text)) return;
+    
+    // Allow empty text for done signal
+    if (!text && !done) return;
+    
+    const next = text ? cur + text : cur;
     assistantResponseRef.current = next;
     setAssistantResponse(next);
     // Send to visualizer (partial while streaming, final when done)

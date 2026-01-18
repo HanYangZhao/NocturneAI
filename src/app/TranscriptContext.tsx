@@ -73,11 +73,11 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
           const isPartial = Boolean(data?.partial);
 
           if (isPartial) {
-            if (!waitingForAIResponse) {
+            if (!waitingForAIResponse && !isAudioPlaying) {
               setCurrentUserText(text);
               setCurrentAssistantText('');
             } else {
-              logger.debug('[TranscriptContext] Ignoring incoming partial USER_TEXT while waiting for AI response');
+              logger.debug('[TranscriptContext] Ignoring incoming partial USER_TEXT while waiting for AI response or audio playing');
             }
           } else {
             setCurrentUserText(text);
@@ -91,8 +91,8 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
           const text = typeof data?.text === 'string' ? data.text : '';
           const isPartial = Boolean(data?.partial);
 
-          if (isPartial && waitingForAIResponse) {
-            logger.debug('[TranscriptContext] Ignoring incoming partial ASSISTANT_TEXT while waiting for AI response');
+          if (isPartial && (waitingForAIResponse || isAudioPlaying)) {
+            logger.debug('[TranscriptContext] Ignoring incoming partial ASSISTANT_TEXT from other tab while waiting for AI response or audio playing');
           } else {
             setCurrentAssistantText(text);
             if (text) {
@@ -153,9 +153,9 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
     setLastUserUpdate(now);
     
     if (partial) {
-      // If we're waiting for an AI response, suppress partials
-      if (waitingForAIResponse) {
-        logger.debug('[TranscriptContext] Suppressing local partial USER_TEXT while waiting for AI response');
+      // If we're waiting for an AI response or audio is playing, suppress partials
+      if (waitingForAIResponse || isAudioPlaying) {
+        logger.debug('[TranscriptContext] Suppressing local partial USER_TEXT while waiting for AI response or audio playing');
         return;
       }
 
@@ -194,13 +194,8 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
   const addAssistantText = (text: string, partial: boolean = false) => {
     const now = Date.now();
     setLastAssistantUpdate(now);
-    // If we're waiting for AI response, suppress assistant partials (avoid flicker)
-    if (partial && waitingForAIResponse) {
-      logger.debug('[TranscriptContext] Suppressing local partial ASSISTANT_TEXT while waiting for AI response');
-      return;
-    }
-
-    // Assistant is responding - show it and clear user text
+    
+    // Always update the display text (both partial and final)
     setCurrentAssistantText(text);
     setCurrentUserText('');
     
