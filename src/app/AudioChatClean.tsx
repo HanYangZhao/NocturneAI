@@ -278,7 +278,15 @@ export default function AudioChatClean() {
     similarity_boost: number;
     style: number;
     speed: number;
-  }>(() => ({ stability: 0.5, use_speaker_boost: true, similarity_boost: 0.75, style: 0, speed: 1 }));
+  }>(() => ({ stability: 0.4, use_speaker_boost: true, similarity_boost: 1, style: 1, speed: 0.5 }));
+
+  // Debug: log when voiceSettings change to detect stale/duplicate component instances
+  useEffect(() => {
+    try {
+      logger.debug('[TTS] voiceSettings changed:', voiceSettings);
+    } catch (e) {}
+  }, [voiceSettings]);
+  
 
   
 
@@ -631,7 +639,10 @@ export default function AudioChatClean() {
         try {
           logger.debug('[TTS] Requesting audio for voice:', voice.name, voice.id);
           
-          // Fetch audio for this voice
+          // Log the voice settings we're about to send for debugging
+          logger.debug('[TTS] Sending voice_settings to /api/tts:', voiceSettings);
+
+          // Fetch audio for this voice using current component state (avoid localStorage races)
           const res = await fetch('/api/tts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-api-password': pwHash },
@@ -640,7 +651,7 @@ export default function AudioChatClean() {
               voiceId: voice.elevenLabsVoiceId,
               voice_settings: {
                 stability: voiceSettings.stability,
-                use_speaker_boost: true,
+                use_speaker_boost: voiceSettings.use_speaker_boost,
                 similarity_boost: voiceSettings.similarity_boost,
                 style: voiceSettings.style,
                 speed: voiceSettings.speed,
@@ -786,6 +797,14 @@ export default function AudioChatClean() {
     }
   }
 
+  // Keep a stable ref to the latest playAssistantTTS so external handlers
+  // (e.g., OpenAI data channel) can invoke the up-to-date function without
+  // being affected by render-time closures.
+  const playAssistantTTSRef = useRef<((text: string) => Promise<void>) | null>(null);
+  useEffect(() => {
+    playAssistantTTSRef.current = playAssistantTTS;
+  }, [playAssistantTTS]);
+
   // Setup graph routing element and audio context on mount
   useEffect(() => {
     (async () => {
@@ -799,13 +818,14 @@ export default function AudioChatClean() {
         const ac = getAudioContext(audioContextRef.current);
         audioContextRef.current = ac;
         AudioFX.initTuna(ac);
-        // create default effects (start bypassed)
+        // create default effects (start bypassed, except Volume which should always be active)
         const initial = EFFECT_TYPES.map((t, i) => ({ id: `fx-${i}-${t}`, type: t }));
         for (const it of initial) {
-          // pass bypass: true so effects load in bypassed state
-          AudioFX.createEffect(it.id, it.type, { bypass: true });
+          // Volume effect should never be bypassed; all others start bypassed
+          const shouldBypass = it.type !== 'Volume';
+          AudioFX.createEffect(it.id, it.type, { bypass: shouldBypass });
         }
-        const initialEffects = initial.map((it) => ({ id: it.id, type: it.type, params: AudioFX.getEffects().find((e:any)=>e.id===it.id)?.params ?? {}, bypass: true }));
+        const initialEffects = initial.map((it) => ({ id: it.id, type: it.type, params: AudioFX.getEffects().find((e:any)=>e.id===it.id)?.params ?? {}, bypass: it.type !== 'Volume' }));
         setEffectsList(initialEffects);
         setActiveEffects(initialEffects); // Sync initial effects to visualizer
         const ids = initial.map((it) => it.id);
@@ -883,7 +903,7 @@ export default function AudioChatClean() {
   const [instruction, setInstruction] = useState<string>(DEFAULT_SYSTEM_INSTRUCTION);
   const [assistantResponse, setAssistantResponse] = useState<string>("");
   const assistantResponseRef = useRef<string>("");
-  const openaiModel = "gpt-realtime-mini";
+  const openaiModel = "gpt-realtime";
 
   async function startRealtime() {
     setElStatus('connecting');
@@ -1095,10 +1115,10 @@ export default function AudioChatClean() {
 
     dc.addEventListener("message", (ev: MessageEvent) => {
       const raw = ev.data;
-      logger.debug("w message:", raw);
+      // logger.debug("w message:", raw);
       try {
         const msg = JSON.parse(String(raw));
-        logger.debug("OpenAI DC parsed message type:", msg.type);
+        // logger.debug("OpenAI DC parsed message type:", msg.type);
         // handle response deltas
         if (msg.type === "response.delta" || msg.type === "response.output_text.delta") {
           const delta = msg.delta ?? msg.text ?? "";
@@ -1108,12 +1128,20 @@ export default function AudioChatClean() {
           appendAssistant("\n[refusal] ");
         }
         if (msg.type === "response.done") {
-          logger.info("OpenAI response done", msg);
+          // logger.info("OpenAI response done", msg);
           // On completion, push the full assistant response to transcript history
           appendAssistant("", true);
           const finalResponse = assistantResponseRef.current?.trim();
           if (finalResponse) {
-            playAssistantTTS(finalResponse);
+            // Use the ref to ensure we call the latest playAssistantTTS (avoid stale closure)
+            try {
+              if (playAssistantTTSRef.current) {
+                // call without await inside this sync handler; swallow any rejection
+                playAssistantTTSRef.current(finalResponse).catch(() => {});
+              }
+            } catch (e) {
+              // swallow - playAssistantTTS logs its own errors
+            }
           }
           // Resume listening for new user input
           setIsWaitingForAIResponse(false);
@@ -1529,8 +1557,20 @@ export default function AudioChatClean() {
                           <input className="w-full" type="range" min={0} max={1} step={0.01} value={voiceSettings.stability} onChange={(e)=> setVoiceSettings(s => ({ ...s, stability: Number(e.target.value) }))} />
                           <div className="text-right text-[11px] text-gray-600">{voiceSettings.stability.toFixed(2)}</div>
 
-                          <label className="block mt-2 mb-1">Speaker Boost</label>
-                          <div className="text-[11px] text-green-600 font-medium">On</div>
+                          <label className="block mt-2 mb-1 flex items-center justify-between">
+                            <span>Speaker Boost</span>
+                            <label className="inline-flex items-center text-[11px]">
+                              <input
+                                type="checkbox"
+                                className="mr-2"
+                                checked={voiceSettings.use_speaker_boost}
+                                onChange={(e) => setVoiceSettings(s => ({ ...s, use_speaker_boost: e.target.checked }))}
+                              />
+                              <span className={`text-[11px] font-medium ${voiceSettings.use_speaker_boost ? 'text-green-600' : 'text-gray-500'}`}>
+                                {voiceSettings.use_speaker_boost ? 'On' : 'Off'}
+                              </span>
+                            </label>
+                          </label>
 
                           <label className="block mt-2 mb-1">Similarity Boost <span className="text-[11px] text-gray-500">(0-1)</span></label>
                           <input className="w-full" type="range" min={0} max={1} step={0.01} value={voiceSettings.similarity_boost} onChange={(e)=> setVoiceSettings(s => ({ ...s, similarity_boost: Number(e.target.value) }))} />

@@ -31,12 +31,13 @@ export async function POST(req: NextRequest) {
 
   // Use the SDK to stream and collect audio chunks
   try {
+    console.log(voice_settings)
     const audioStream = await client.textToSpeech.stream(effectiveVoiceId, {
-      modelId: "eleven_flash_v2_5",
+      modelId: "eleven_turbo_v2_5",
       text,
-      outputFormat: "mp3_44100_128",
-      // Pass voice settings from the UI if provided
-      ...(voice_settings ? { voice_settings } : {}),
+      outputFormat: "mp3_44100_192",
+      // Pass voice settings from the UI if provided (include both nested and flattened forms)
+      ...(voice_settings ? { voice_settings, ...voice_settings } : {}),
     });
 
     const chunks: Uint8Array[] = [];
