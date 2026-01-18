@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
     return new Response(JSON.stringify({ error: 'Invalid API password' }), { status: 401, headers: { "Content-Type": "application/json" } });
   }
   const body = await req.json().catch(() => ({}));
-  const model = (body.model as string) || "gpt-realtime-mini";
+  const model = (body.model as string) || "gpt-realtime";
 
   const openaiKey = process.env.OPENAI_API_KEY;
   if (!openaiKey) {
