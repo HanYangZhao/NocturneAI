@@ -30,7 +30,17 @@ function getAudioContext(existing: AudioContext | null): AudioContext {
 function updateAllEffects(effects: Array<{ id: string; type: string; params: any; bypass?: boolean }>, params: Record<string, any>) {
   for (const f of effects) {
     try {
-      AudioFX.updateEffectParams(f.id, params);
+      // Never change the Volume effect's bypass state here — Volume should always stay on.
+      if (f.type === 'Volume') {
+        // If params contains other keys besides bypass, apply them; otherwise skip.
+        const p = { ...params };
+        if ('bypass' in p) delete p.bypass;
+        if (Object.keys(p).length > 0) {
+          AudioFX.updateEffectParams(f.id, p);
+        }
+      } else {
+        AudioFX.updateEffectParams(f.id, params);
+      }
     } catch (e) {
       // ignore
     }
@@ -1767,24 +1777,26 @@ export default function AudioChatClean() {
                 {/** Bypass all / Enable all toggle */}
                 <button
                   onClick={() => {
-                    const allBypassed = effectsList.length > 0 && effectsList.every((f) => !!f.bypass);
+                    const allBypassed = effectsList.length > 0 && effectsList.every((f) => !!f.bypass || f.type === 'Volume');
                     const setTo = !allBypassed;
-                    const next = effectsList.map((f) => ({ ...f, bypass: setTo }));
+                    // Keep Volume always enabled (bypass: false)
+                    const next = effectsList.map((f) => ({ ...f, bypass: f.type === 'Volume' ? false : setTo }));
                     setEffectsList(next);
                     setActiveEffects(next); // Sync to visualizer
+                    // updateAllEffects will skip changing Volume's bypass
                     updateAllEffects(next, { bypass: setTo });
                   }}
                   className="text-xs px-2 py-1 border rounded"
                 >
-                  {effectsList.length > 0 && effectsList.every((f) => !!f.bypass) ? 'Enable All' : 'Bypass All'}
+                  {effectsList.length > 0 && effectsList.every((f) => !!f.bypass || f.type === 'Volume') ? 'Enable All' : 'Bypass All'}
                 </button>
                 {/** Particle FX Connect/Disconnect Toggle */}
                 <button
                   onClick={() => {
                     if (particleFxConnected) {
-                      // Disconnecting: save current state and bypass all
+                      // Disconnecting: save current state and bypass all (except Volume)
                       previousEffectsRef.current = effectsList;
-                      const next = effectsList.map((f) => ({ ...f, bypass: true }));
+                      const next = effectsList.map((f) => ({ ...f, bypass: f.type === 'Volume' ? false : true }));
                       setEffectsList(next);
                       setActiveEffects(next);
                       updateAllEffects(next, { bypass: true });
