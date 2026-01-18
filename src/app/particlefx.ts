@@ -163,7 +163,7 @@ export function getParticleEffectState(): ParticleEffectState {
 
       case 'Compressor':
         state.compressor = {
-          threshold: effect.params?.threshold ?? -20,
+          threshold: effect.params?.threshold ?? -30,
           ratio: effect.params?.ratio ?? 4,
         };
         break;

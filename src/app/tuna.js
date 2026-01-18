@@ -568,10 +568,10 @@ Tuna.prototype.Chorus.prototype = Object.create(Super, {
 /**
  * Compressor effect
  * @param {Object} [properties]
- * @param {number} [properties.threshold=-20]
- * @param {number} [properties.release=250]
- * @param {number} [properties.makeupGain=1]
- * @param {number} [properties.attack=1]
+ * @param {number} [properties.threshold=-30]
+ * @param {number} [properties.release=100]
+ * @param {number} [properties.makeupGain=0.5]
+ * @param {number} [properties.attack=50]
  * @param {number} [properties.ratio=4]
  * @param {number} [properties.knee=5]
  * @param {boolean} [properties.automakeup=false]
@@ -612,28 +612,28 @@ Tuna.prototype.Compressor.prototype = Object.create(Super, {
         writable: true,
         value: {
             threshold: {
-                value: -20,
+                value: -30,
                 min: -60,
                 max: 0,
                 automatable: true,
                 type: FLOAT
             },
             release: {
-                value: 250,
+                value: 100,
                 min: 10,
                 max: 2000,
                 automatable: true,
                 type: FLOAT
             },
             makeupGain: {
-                value: 1,
+                value: 0.5,
                 min: 1,
                 max: 100,
                 automatable: true,
                 type: FLOAT
             },
             attack: {
-                value: 1,
+                value: 50,
                 min: 0,
                 max: 1000,
                 automatable: true,
