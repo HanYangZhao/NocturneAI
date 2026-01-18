@@ -15,7 +15,7 @@ export function formatNumericValue(n: unknown): string {
 }
 
 // Available effect types
-export const EFFECT_TYPES = ['Overdrive','Bitcrusher','Filter','Phaser','Chorus','Tremolo','RingModulator','Delay','Convolver','Compressor'] as const;
+export const EFFECT_TYPES = ['Overdrive','Bitcrusher','Filter','Phaser','Chorus','Tremolo','RingModulator','Delay','Convolver','Compressor','Volume'] as const;
 
 // Filter type options for Filter effect
 export const FILTER_TYPES = ['lowpass', 'highpass', 'bandpass', 'lowshelf', 'highshelf', 'peaking', 'notch', 'allpass'] as const;
@@ -53,6 +53,8 @@ export function useParamRanges(): Record<string, { min: number; max: number; ste
     gain: { min: -40, max: 40, step: 0.63 * midiCCScaler },
     // Tremolo params
     intensity: { min: 0, max: 1, step: 0.0079 * midiCCScaler },
+    // Master volume
+    volume: { min: 0, max: 1, step: 0.01 * midiCCScaler },
     // Bitcrusher params
     bits: { min: 1, max: 16, step: 1 },
     normfreq: { min: 0, max: 1, step: 0.0079 * midiCCScaler },

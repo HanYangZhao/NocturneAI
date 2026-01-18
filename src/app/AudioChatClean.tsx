@@ -48,13 +48,15 @@ function setStreamMuted(stream: MediaStream | null, muted: boolean): boolean {
 
 // Helper: Reset all effects to default state (disabled)
 function resetAllEffects(effectsList: Array<{ id: string; type: string; params: any; bypass?: boolean }>, setEffectsList: any, setActiveEffects: any, resetParticles: () => void) {
-  const resetEffects = effectsList.map((f) => ({ ...f, bypass: true }));
+  const resetEffects = effectsList.map((f) => ({ ...f, bypass: f.type === 'Volume' ? false : true }));
   setEffectsList(resetEffects);
   setActiveEffects(resetEffects);
   
   for (const f of resetEffects) {
-    try { 
-      AudioFX.updateEffectParams(f.id, { bypass: true }); 
+    try {
+      if (f.type !== 'Volume') {
+        AudioFX.updateEffectParams(f.id, { bypass: true });
+      }
     } catch (e) {}
   }
   
@@ -1794,10 +1796,14 @@ export default function AudioChatClean() {
                 <div key={fx.id} className={`p-3 border rounded text-xs ${fx.bypass ? 'bg-gray-50' : 'bg-green-100'}`}>
                   <div className="flex items-center justify-between">
                     <div className="font-medium">{fx.type}</div>
-                    <div className="flex items-center gap-2">
-                      <label className="text-[11px]">Bypass</label>
-                      <input type="checkbox" checked={!!fx.bypass} onChange={(e)=>{ const v=e.target.checked; const nextEffects = effectsList.map(x=> x.id===fx.id?{...x,bypass:v}:x); setEffectsList(nextEffects); if (particleFxConnected) setActiveEffects(nextEffects); AudioFX.updateEffectParams(fx.id, { bypass: v }); }} />
-                    </div>
+                    {fx.type !== 'Volume' ? (
+                      <div className="flex items-center gap-2">
+                        <label className="text-[11px]">Bypass</label>
+                        <input type="checkbox" checked={!!fx.bypass} onChange={(e)=>{ const v=e.target.checked; const nextEffects = effectsList.map(x=> x.id===fx.id?{...x,bypass:v}:x); setEffectsList(nextEffects); if (particleFxConnected) setActiveEffects(nextEffects); AudioFX.updateEffectParams(fx.id, { bypass: v }); }} />
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-gray-600">Always On</div>
+                    )}
                   </div>
                   <div className="mt-2 grid grid-cols-2 gap-2">
                     {Object.keys(fx.params || {}).slice(0,6).map((k) => {

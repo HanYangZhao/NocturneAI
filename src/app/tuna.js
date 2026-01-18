@@ -380,6 +380,48 @@ Tuna.prototype.Cabinet.prototype = Object.create(Super, {
 });
 
 /**
+ * Volume effect
+ * @param {Object} [properties]
+ * @param {number} [properties.volume=1]
+ * @param {boolean} [properties.bypass=false]
+ */
+Tuna.prototype.Volume = function (properties) {
+    if (!properties) {
+        properties = this.getDefaults();
+    }
+    this.input = userContext.createGain();
+    this.activateNode = userContext.createGain();
+    this.gainNode = userContext.createGain();
+    this.output = userContext.createGain();
+
+    this.activateNode.connect(this.gainNode);
+    this.gainNode.connect(this.output);
+
+    // initialize without smoothing to avoid clicks on init
+    this.gainNode.gain.value = initValue(properties.volume, this.defaults.volume.value);
+    this.bypass = properties.bypass || this.defaults.bypass.value;
+};
+Tuna.prototype.Volume.prototype = Object.create(Super, {
+    name: { value: "Volume" },
+    defaults: {
+        writable: true,
+        value: {
+            volume: { value: 1, min: 0, max: 2, automatable: true, type: FLOAT },
+            bypass: { value: false, automatable: false, type: BOOLEAN }
+        }
+    },
+    volume: {
+        enumerable: true,
+        get: function () {
+            return this.gainNode.gain;
+        },
+        set: function (value) {
+            this.gainNode.gain.setTargetAtTime(value, userContext.currentTime, 0.01);
+        }
+    }
+});
+
+/**
  * Chorus effect
  * @param {Object} [properties]
  * @param {number} [properties.feedback=0.4]
