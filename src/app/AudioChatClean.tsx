@@ -274,11 +274,11 @@ export default function AudioChatClean() {
   // Voice TTS generation settings (controlled by UI)
   const [voiceSettings, setVoiceSettings] = useState<{
     stability: number;
-    use_speaker_boost: boolean;
-    similarity_boost: number;
+    useSpeakerBoost: boolean;
+    similarityBoost: number;
     style: number;
     speed: number;
-  }>(() => ({ stability: 0.4, use_speaker_boost: false, similarity_boost: 1, style: 1, speed: 0.5 }));
+  }>(() => ({ stability: 0.4, useSpeakerBoost: false, similarityBoost: 0.9, style: 0.3, speed: 0.85 }));
 
   // Debug: log when voiceSettings change to detect stale/duplicate component instances
   useEffect(() => {
@@ -651,8 +651,8 @@ export default function AudioChatClean() {
               voiceId: voice.elevenLabsVoiceId,
               voice_settings: {
                 stability: voiceSettings.stability,
-                use_speaker_boost: voiceSettings.use_speaker_boost,
-                similarity_boost: voiceSettings.similarity_boost,
+                useSpeakerBoost: voiceSettings.useSpeakerBoost,
+                similarityBoost: voiceSettings.similarityBoost,
                 style: voiceSettings.style,
                 speed: voiceSettings.speed,
               }
@@ -1573,25 +1573,25 @@ export default function AudioChatClean() {
                               <input
                                 type="checkbox"
                                 className="mr-2"
-                                checked={voiceSettings.use_speaker_boost}
-                                onChange={(e) => setVoiceSettings(s => ({ ...s, use_speaker_boost: e.target.checked }))}
+                                checked={voiceSettings.useSpeakerBoost}
+                                onChange={(e) => setVoiceSettings(s => ({ ...s, useSpeakerBoost: e.target.checked }))}
                               />
-                              <span className={`text-[11px] font-medium ${voiceSettings.use_speaker_boost ? 'text-green-600' : 'text-gray-500'}`}>
-                                {voiceSettings.use_speaker_boost ? 'On' : 'Off'}
+                              <span className={`text-[11px] font-medium ${voiceSettings.useSpeakerBoost ? 'text-green-600' : 'text-gray-500'}`}>
+                                {voiceSettings.useSpeakerBoost ? 'On' : 'Off'}
                               </span>
                             </label>
                           </label>
 
                           <label className="block mt-2 mb-1">Similarity Boost <span className="text-[11px] text-gray-500">(0-1)</span></label>
-                          <input className="w-full" type="range" min={0} max={1} step={0.01} value={voiceSettings.similarity_boost} onChange={(e)=> setVoiceSettings(s => ({ ...s, similarity_boost: Number(e.target.value) }))} />
-                          <div className="text-right text-[11px] text-gray-600">{voiceSettings.similarity_boost.toFixed(2)}</div>
+                          <input className="w-full" type="range" min={0} max={1} step={0.01} value={voiceSettings.similarityBoost} onChange={(e)=> setVoiceSettings(s => ({ ...s, similarityBoost: Number(e.target.value) }))} />
+                          <div className="text-right text-[11px] text-gray-600">{voiceSettings.similarityBoost.toFixed(2)}</div>
 
-                          <label className="block mt-2 mb-1">Style <span className="text-[11px] text-gray-500">(int)</span></label>
-                          <input className="w-full" type="range" min={0} max={5} step={1} value={voiceSettings.style} onChange={(e)=> setVoiceSettings(s => ({ ...s, style: Number(e.target.value) }))} />
+                          <label className="block mt-2 mb-1">Style <span className="text-[11px] text-gray-500">(0-1)</span></label>
+                          <input className="w-full" type="range" min={0} max={1} step={0.1} value={voiceSettings.style} onChange={(e)=> setVoiceSettings(s => ({ ...s, style: Number(e.target.value) }))} />
                           <div className="text-right text-[11px] text-gray-600">{voiceSettings.style}</div>
 
-                          <label className="block mt-2 mb-1">Speed <span className="text-[11px] text-gray-500">(0.5-2)</span></label>
-                          <input className="w-full" type="range" min={0.5} max={2} step={0.01} value={voiceSettings.speed} onChange={(e)=> setVoiceSettings(s => ({ ...s, speed: Number(e.target.value) }))} />
+                          <label className="block mt-2 mb-1">Speed <span className="text-[11px] text-gray-500">(0.7-1.2)</span></label>
+                          <input className="w-full" type="range" min={0.7} max={1.2} step={0.01} value={voiceSettings.speed} onChange={(e)=> setVoiceSettings(s => ({ ...s, speed: Number(e.target.value) }))} />
                           <div className="text-right text-[11px] text-gray-600">{voiceSettings.speed.toFixed(2)}</div>
                         </div>
                       )}

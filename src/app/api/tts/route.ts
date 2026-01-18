@@ -37,7 +37,9 @@ export async function POST(req: NextRequest) {
       text,
       outputFormat: "mp3_44100_192",
       // Pass voice settings from the UI if provided (include both nested and flattened forms)
-      ...(voice_settings ? { voice_settings, ...voice_settings } : {}),
+      voiceSettings: {
+        ...voice_settings,
+      }
     });
 
     const chunks: Uint8Array[] = [];
@@ -96,6 +98,9 @@ export async function POST(req: NextRequest) {
     return new Response(out, { headers: { "Content-Type": "audio/mpeg", "Content-Length": String(out.length) } });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : '';
+    console.error('[TTS API] Error generating speech:', message);
+    if (stack) console.error('[TTS API] Stack:', stack);
     return new Response(JSON.stringify({ error: message }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
 }
