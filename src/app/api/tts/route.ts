@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const text = body.text as string | undefined;
   const voiceId = body.voiceId as string | undefined;
+  const voice_settings = body.voice_settings as any | undefined;
   if (!text) {
     return new Response(JSON.stringify({ error: "Missing text" }), { status: 400, headers: { "Content-Type": "application/json" } });
   }
@@ -34,6 +35,8 @@ export async function POST(req: NextRequest) {
       modelId: "eleven_flash_v2_5",
       text,
       outputFormat: "mp3_44100_128",
+      // Pass voice settings from the UI if provided
+      ...(voice_settings ? { voice_settings } : {}),
     });
 
     const chunks: Uint8Array[] = [];

@@ -27,6 +27,8 @@ interface TranscriptContextType {
   resetParticles: () => void; // Trigger particle position reset
   isAudioPlaying: boolean; // Track if audio (mic or output) is currently playing
   setIsAudioPlaying: (playing: boolean) => void; // Set audio playing state
+  waitingForAIResponse: boolean; // When true, suppress partial transcripts
+  setWaitingForAIResponse: (waiting: boolean) => void;
 }
 
 const TranscriptContext = createContext<TranscriptContextType | undefined>(undefined);
@@ -46,6 +48,7 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
   const lastUserMessageRef = useRef<TranscriptMessage | null>(null);
   const lastAssistantMessageRef = useRef<TranscriptMessage | null>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
+  const [waitingForAIResponse, setWaitingForAIResponse] = useState(false);
 
   // Initialize BroadcastChannel for cross-tab communication
   useEffect(() => {
@@ -70,8 +73,12 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
           const isPartial = Boolean(data?.partial);
 
           if (isPartial) {
-            setCurrentUserText(text);
-            setCurrentAssistantText('');
+            if (!waitingForAIResponse) {
+              setCurrentUserText(text);
+              setCurrentAssistantText('');
+            } else {
+              logger.debug('[TranscriptContext] Ignoring incoming partial USER_TEXT while waiting for AI response');
+            }
           } else {
             setCurrentUserText(text);
             if (text.trim() && data?.message) {
@@ -84,9 +91,13 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
           const text = typeof data?.text === 'string' ? data.text : '';
           const isPartial = Boolean(data?.partial);
 
-          setCurrentAssistantText(text);
-          if (text) {
-            setCurrentUserText('');
+          if (isPartial && waitingForAIResponse) {
+            logger.debug('[TranscriptContext] Ignoring incoming partial ASSISTANT_TEXT while waiting for AI response');
+          } else {
+            setCurrentAssistantText(text);
+            if (text) {
+              setCurrentUserText('');
+            }
           }
 
           if (!isPartial && text.trim() && data?.message) {
@@ -142,9 +153,15 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
     setLastUserUpdate(now);
     
     if (partial) {
+      // If we're waiting for an AI response, suppress partials
+      if (waitingForAIResponse) {
+        logger.debug('[TranscriptContext] Suppressing local partial USER_TEXT while waiting for AI response');
+        return;
+      }
+
       // User is speaking - show partial transcript
       setCurrentUserText(text);
-      
+
       // Broadcast partial text to other tabs
       channelRef.current?.postMessage({
         type: 'USER_TEXT',
@@ -177,7 +194,12 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
   const addAssistantText = (text: string, partial: boolean = false) => {
     const now = Date.now();
     setLastAssistantUpdate(now);
-    
+    // If we're waiting for AI response, suppress assistant partials (avoid flicker)
+    if (partial && waitingForAIResponse) {
+      logger.debug('[TranscriptContext] Suppressing local partial ASSISTANT_TEXT while waiting for AI response');
+      return;
+    }
+
     // Assistant is responding - show it and clear user text
     setCurrentAssistantText(text);
     setCurrentUserText('');
@@ -205,6 +227,15 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
         type: 'ASSISTANT_TEXT',
         data: { text, partial, message: null, timestamp: now },
       });
+    }
+  };
+
+  const setWaitingForAIResponseWithBroadcast = (waiting: boolean) => {
+    setWaitingForAIResponse(waiting);
+    try {
+      channelRef.current?.postMessage({ type: 'WAITING_FOR_RESPONSE', data: waiting });
+    } catch (e) {
+      // ignore
     }
   };
 
@@ -291,6 +322,8 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
         resetParticles: resetParticlesWithBroadcast,
         isAudioPlaying,
         setIsAudioPlaying: setIsAudioPlayingWithBroadcast,
+        waitingForAIResponse,
+        setWaitingForAIResponse: setWaitingForAIResponseWithBroadcast,
       }}
     >
       {children}

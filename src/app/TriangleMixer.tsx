@@ -12,6 +12,7 @@ interface TriangleMixerProps {
   onMixChange: (mix: { [voiceId: string]: number }) => void;
   onToggleVoice?: (voiceId: string) => void;
   isAudioPlaying?: boolean;
+  settings?: React.ReactNode;
 }
 
 /**
@@ -19,7 +20,7 @@ interface TriangleMixerProps {
  * Place a dot in the circle to control the mix of all enabled voices
  * Center = equal mix, edges favor individual voices
  */
-export default function TriangleMixer({ voices, onMixChange, onToggleVoice, isAudioPlaying }: TriangleMixerProps) {
+export default function TriangleMixer({ voices, onMixChange, onToggleVoice, isAudioPlaying, settings }: TriangleMixerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [position, setPosition] = useState({ x: 0.5, y: 0.5 }); // Normalized 0-1
@@ -322,7 +323,7 @@ export default function TriangleMixer({ voices, onMixChange, onToggleVoice, isAu
   return (
     <div className="flex gap-4 items-start">
       {/* Voice selector - left side vertical box */}
-      <div className="p-2 border rounded bg-gray-50 h-fit">
+      <div id="triangle-voice-selector" className="p-2 border rounded bg-gray-50 h-fit">
         <div className="text-xs font-medium mb-2">Voice Selector {isAudioPlaying && <span className="text-orange-500">(Locked during playback)</span>}</div>
         <div className="space-y-1">
           {voices.map((voice) => (
@@ -340,6 +341,11 @@ export default function TriangleMixer({ voices, onMixChange, onToggleVoice, isAu
             </label>
           ))}
         </div>
+        {settings && (
+          <div className="mt-3">
+            {settings}
+          </div>
+        )}
       </div>
       
       {/* Mixer and controls - right side */}

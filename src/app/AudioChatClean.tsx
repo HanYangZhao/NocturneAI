@@ -271,6 +271,17 @@ export default function AudioChatClean() {
   const postEffectsGainRef = useRef<GainNode | null>(null);
   const voicesRef = useRef(voices);
 
+  // Voice TTS generation settings (controlled by UI)
+  const [voiceSettings, setVoiceSettings] = useState<{
+    stability: number;
+    use_speaker_boost: boolean;
+    similarity_boost: number;
+    style: number;
+    speed: number;
+  }>(() => ({ stability: 0.5, use_speaker_boost: true, similarity_boost: 0.75, style: 0, speed: 1 }));
+
+  
+
   // Pan presets
   const [panPresets, setPanPresets] = useState<PanPreset[]>(() => {
     // Check if we're in the browser before accessing localStorage
@@ -625,8 +636,15 @@ export default function AudioChatClean() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-api-password': pwHash },
             body: JSON.stringify({ 
-              text, 
-              voiceId: voice.elevenLabsVoiceId 
+              text,
+              voiceId: voice.elevenLabsVoiceId,
+              voice_settings: {
+                stability: voiceSettings.stability,
+                use_speaker_boost: true,
+                similarity_boost: voiceSettings.similarity_boost,
+                style: voiceSettings.style,
+                speed: voiceSettings.speed,
+              }
             }),
           });
           
@@ -853,6 +871,7 @@ export default function AudioChatClean() {
   const [transcript, setTranscript] = useState("");
   const [partialTranscript, setPartialTranscript] = useState("");
   const [isWaitingForAIResponse, setIsWaitingForAIResponse] = useState(false);
+  const { setWaitingForAIResponse } = useTranscript();
   // Store transcript history as array of { role, text }
   const [transcriptHistory, setTranscriptHistory] = useState<{ role: "user" | "assistant"; text: string }[]>([]);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -962,6 +981,7 @@ export default function AudioChatClean() {
           logger.info("Committed transcript:", text);
           // Mark that we're waiting for AI response - don't listen for new transcripts until we get a response
           setIsWaitingForAIResponse(true);
+          try { setWaitingForAIResponse?.(true); } catch (e) {}
           if (text) await sendTextToOpenAI(text);
         }
       });
@@ -1097,6 +1117,7 @@ export default function AudioChatClean() {
           }
           // Resume listening for new user input
           setIsWaitingForAIResponse(false);
+          try { setWaitingForAIResponse?.(false); } catch (e) {}
           // clear assistant output after a short delay so the UI resets for next response
           setTimeout(() => {
             assistantResponseRef.current = "";
@@ -1487,27 +1508,53 @@ export default function AudioChatClean() {
                   {isPlayingSample ? 'Stop Sample' : 'Play Audio Sample'}
                 </button>
               </div>
-              <div className="p-3 border rounded bg-gray-50">
-                <TriangleMixer
-                  voices={voices}
-                  isAudioPlaying={isAudioPlaying}
-                  onMixChange={(mix) => {
-                    // Update mixer volumes based on 2D control
-                    if (audioMixerRef.current) {
-                      Object.entries(mix).forEach(([voiceId, volume]) => {
-                        audioMixerRef.current!.setChannelVolume(voiceId, volume);
-                      });
-                      setVoiceChannels(audioMixerRef.current.getChannels());
-                    }
-                  }}
-                  onToggleVoice={toggleVoiceEnabled}
-                />
-                {voices.filter(v => v.enabled && v.elevenLabsVoiceId).length === 0 && (
-                  <div className="text-xs text-gray-500 text-center py-2 mt-2">
-                    Configure voices in src/app/voices.json
+                <div className="p-3 border rounded bg-gray-50">
+                  <div>
+                    <TriangleMixer
+                      voices={voices}
+                      isAudioPlaying={isAudioPlaying}
+                      onMixChange={(mix) => {
+                        if (audioMixerRef.current) {
+                          Object.entries(mix).forEach(([voiceId, volume]) => {
+                            audioMixerRef.current!.setChannelVolume(voiceId, volume);
+                          });
+                          setVoiceChannels(audioMixerRef.current.getChannels());
+                        }
+                      }}
+                      onToggleVoice={toggleVoiceEnabled}
+                      settings={(
+                        <div className="w-full text-xs">
+                          <div className="font-medium mb-2">Voice Settings</div>
+                          <label className="block mb-1">Stability <span className="text-[11px] text-gray-500">(0-1)</span></label>
+                          <input className="w-full" type="range" min={0} max={1} step={0.01} value={voiceSettings.stability} onChange={(e)=> setVoiceSettings(s => ({ ...s, stability: Number(e.target.value) }))} />
+                          <div className="text-right text-[11px] text-gray-600">{voiceSettings.stability.toFixed(2)}</div>
+
+                          <label className="block mt-2 mb-1">Speaker Boost</label>
+                          <div className="text-[11px] text-green-600 font-medium">On</div>
+
+                          <label className="block mt-2 mb-1">Similarity Boost <span className="text-[11px] text-gray-500">(0-1)</span></label>
+                          <input className="w-full" type="range" min={0} max={1} step={0.01} value={voiceSettings.similarity_boost} onChange={(e)=> setVoiceSettings(s => ({ ...s, similarity_boost: Number(e.target.value) }))} />
+                          <div className="text-right text-[11px] text-gray-600">{voiceSettings.similarity_boost.toFixed(2)}</div>
+
+                          <label className="block mt-2 mb-1">Style <span className="text-[11px] text-gray-500">(int)</span></label>
+                          <input className="w-full" type="range" min={0} max={5} step={1} value={voiceSettings.style} onChange={(e)=> setVoiceSettings(s => ({ ...s, style: Number(e.target.value) }))} />
+                          <div className="text-right text-[11px] text-gray-600">{voiceSettings.style}</div>
+
+                          <label className="block mt-2 mb-1">Speed <span className="text-[11px] text-gray-500">(0.5-2)</span></label>
+                          <input className="w-full" type="range" min={0.5} max={2} step={0.01} value={voiceSettings.speed} onChange={(e)=> setVoiceSettings(s => ({ ...s, speed: Number(e.target.value) }))} />
+                          <div className="text-right text-[11px] text-gray-600">{voiceSettings.speed.toFixed(2)}</div>
+                        </div>
+                      )}
+                    />
+                    {voices.filter(v => v.enabled && v.elevenLabsVoiceId).length === 0 && (
+                      <div className="text-xs text-gray-500 text-center py-2 mt-2">
+                        Configure voices in src/app/voices.json
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+
+                  
+                </div>
             </div>
             {/* Voice Panning Section */}
             <div className="mt-3">
