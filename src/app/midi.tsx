@@ -52,9 +52,9 @@ export function useParamRanges(): Record<string, { min: number; max: number; ste
     Q: { min: 0.001, max: 100, step: 0.787 * midiCCScaler },
     gain: { min: -40, max: 40, step: 0.63 * midiCCScaler },
     // Tremolo params
-    intensity: { min: 0, max: 1, step: 0.0079 * midiCCScaler },
+    intensity: { min: 0, max: 1, step: 0.00787 * midiCCScaler },
     // Master volume
-    volume: { min: 0, max: 1, step: 0.01 * midiCCScaler },
+    volume: { min: 0, max: 1, step: 0.00787 * midiCCScaler },
     // Bitcrusher params
     bits: { min: 1, max: 16, step: 1 },
     normfreq: { min: 0, max: 1, step: 0.0079 * midiCCScaler },
@@ -266,14 +266,18 @@ export default function MidiController({ paramLabels = [], onMidiCC, onButtonAct
         // attach listeners
         const inputs = Array.from(acc.inputs.values()) as any[];
         inputsRef.current = inputs;
-        setAvailableInputs(inputs.map((i) => ({ id: i.id, name: i.name || i.manufacturer || i.id })));
+        const mapped = inputs.map((i) => ({ id: i.id, name: i.name || i.manufacturer || i.id }));
+        setAvailableInputs(mapped);
+        try { window.dispatchEvent(new CustomEvent('midi:inputsChanged', { detail: mapped })); } catch (e) {}
         for (const inp of inputs) {
           inp.onmidimessage = handleMidiMessage;
         }
         acc.onstatechange = (e: any) => {
           // refresh inputs
           inputsRef.current = Array.from(acc.inputs.values()) as any[];
-          setAvailableInputs(inputsRef.current.map((i) => ({ id: i.id, name: i.name || i.manufacturer || i.id })));
+          const mapped2 = inputsRef.current.map((i) => ({ id: i.id, name: i.name || i.manufacturer || i.id }));
+          setAvailableInputs(mapped2);
+          try { window.dispatchEvent(new CustomEvent('midi:inputsChanged', { detail: mapped2 })); } catch (e) {}
           for (const inp of inputsRef.current) inp.onmidimessage = handleMidiMessage;
         };
       } catch (e) {

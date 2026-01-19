@@ -906,6 +906,8 @@ export default function AudioChatClean() {
       ensureGraphRouting();
     })();
 
+      // MIDI controller is mounted elsewhere; no inline badge handling required here.
+
     // initialize default effects once audioContext available
     (async () => {
       try {
@@ -1854,6 +1856,7 @@ export default function AudioChatClean() {
                 >
                   MIDI Mapper
                 </button>
+                
                 {/** Bypass all / Enable all toggle */}
                 <button
                   onClick={() => {
@@ -2071,72 +2074,70 @@ export default function AudioChatClean() {
                 </div>
               ))}
             </div>
-            {/* MIDI Controller Modal */}
-            {showMidiController && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-auto">
-                  <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white">
-                    <strong className="text-lg">MIDI Mapper (CC & Notes)</strong>
-                    <button
-                      onClick={() => setShowMidiController(false)}
-                      className="text-2xl font-bold text-gray-500 hover:text-gray-700"
-                    >
-                      ×
-                    </button>
-                  </div>
-                  <div className="p-4">
-                    <MidiController 
-                      availablePanPresets={panPresets.map(p => ({ id: p.id, name: p.name }))}
-                      onPanPreset={(presetId) => {
-                        logger.info('[MIDI] onPanPreset called with presetId:', presetId);
-                        try {
-                          const preset = panPresets.find(p => p.id === presetId);
-                          logger.info('[MIDI] Found preset?', !!preset, 'audioMixer exists?', !!audioMixerRef.current);
-                          if (preset && audioMixerRef.current) {
-                            logger.info('[MIDI] Setting preset ID to:', presetId);
-                            setCurrentPanPresetId(presetId);
-                            // Apply each voice's pan value through the mixer
-                            voices.forEach(v => {
-                              const pan = preset.pans[v.id] ?? 0;
-                              logger.info('[MIDI] Setting pan for', v.id, ':', pan);
-                              audioMixerRef.current!.setChannelPan(v.id, pan);
-                            });
-                            setVoiceChannels(audioMixerRef.current.getChannels());
-                            logger.info('[MIDI] Applied pan preset:', preset.name, preset.pans);
-                          } else {
-                            logger.warn('[MIDI] Cannot apply preset - preset:', !!preset, 'mixer:', !!audioMixerRef.current);
-                          }
-                        } catch (e) {
-                          logger.error('[MIDI] Failed to apply pan preset', presetId, e);
+            {/* MIDI Controller Modal - always mounted so MIDI access initializes automatically. */}
+            <div className={`${showMidiController ? '' : 'hidden'} fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4`}>
+              <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-auto">
+                <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white">
+                  <strong className="text-lg">MIDI Mapper (CC & Notes)</strong>
+                  <button
+                    onClick={() => setShowMidiController(false)}
+                    className="text-2xl font-bold text-gray-500 hover:text-gray-700"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="p-4">
+                  <MidiController 
+                    availablePanPresets={panPresets.map(p => ({ id: p.id, name: p.name }))}
+                    onPanPreset={(presetId) => {
+                      logger.info('[MIDI] onPanPreset called with presetId:', presetId);
+                      try {
+                        const preset = panPresets.find(p => p.id === presetId);
+                        logger.info('[MIDI] Found preset?', !!preset, 'audioMixer exists?', !!audioMixerRef.current);
+                        if (preset && audioMixerRef.current) {
+                          logger.info('[MIDI] Setting preset ID to:', presetId);
+                          setCurrentPanPresetId(presetId);
+                          // Apply each voice's pan value through the mixer
+                          voices.forEach(v => {
+                            const pan = preset.pans[v.id] ?? 0;
+                            logger.info('[MIDI] Setting pan for', v.id, ':', pan);
+                            audioMixerRef.current!.setChannelPan(v.id, pan);
+                          });
+                          setVoiceChannels(audioMixerRef.current.getChannels());
+                          logger.info('[MIDI] Applied pan preset:', preset.name, preset.pans);
+                        } else {
+                          logger.warn('[MIDI] Cannot apply preset - preset:', !!preset, 'mixer:', !!audioMixerRef.current);
                         }
-                      }}
-                      onButtonAction={(action) => {
-                        try {
-                          if (action === 'stopAudio') {
-                            stopTTSPlayback();
-                          } else if (action === 'muteMic') {
-                            muteMic();
-                          } else if (action === 'unmuteMic') {
+                      } catch (e) {
+                        logger.error('[MIDI] Failed to apply pan preset', presetId, e);
+                      }
+                    }}
+                    onButtonAction={(action) => {
+                      try {
+                        if (action === 'stopAudio') {
+                          stopTTSPlayback();
+                        } else if (action === 'muteMic') {
+                          muteMic();
+                        } else if (action === 'unmuteMic') {
+                          unmuteMic();
+                        } else if (action === 'toggleMic') {
+                          // Use ref to get current state, avoiding stale closure
+                          if (micMutedRef.current) {
                             unmuteMic();
-                          } else if (action === 'toggleMic') {
-                            // Use ref to get current state, avoiding stale closure
-                            if (micMutedRef.current) {
-                              unmuteMic();
-                            } else {
-                              muteMic();
-                            }
-                          } else if (action === 'resetAllFX') {
-                            resetAllEffects(effectsList, setEffectsList, setActiveEffects, resetParticles);
+                          } else {
+                            muteMic();
                           }
-                        } catch (e) {
-                          logger.warn('[MIDI] Failed to execute button action', action, e);
+                        } else if (action === 'resetAllFX') {
+                          resetAllEffects(effectsList, setEffectsList, setActiveEffects, resetParticles);
                         }
-                      }}
-                    />
-                  </div>
+                      } catch (e) {
+                        logger.warn('[MIDI] Failed to execute button action', action, e);
+                      }
+                    }}
+                  />
                 </div>
               </div>
-            )}
+            </div>
             {/* Signal Chain moved to its own panel below the main area */}
           </div>
         </div>
