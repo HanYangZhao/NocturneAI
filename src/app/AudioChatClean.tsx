@@ -192,20 +192,21 @@ export default function AudioChatClean() {
           AudioFX.asyncConnectChain(masterGain as unknown as AudioNode, postEffectsGainRef.current as unknown as AudioNode);
           logger.debug('[Sample] Effects chain connected through post-effects gain node');
           
-          // Display sample text in visualizer
+          source.start(0);
+          // Display sample text in visualizer once audio starts
           if (sampleText) {
+            try { showVisualizerTextRef.current = true; } catch (e) {}
             // Set the complete text at once - the visualizer will handle displaying it in 30-word windows
             addAssistantText(sampleText, false);
             logger.debug('[Sample] Set full sample text to visualizer:', sampleText.split(/\s+/).length, 'words');
           }
-          
-          source.start(0);
           // Start particle FX (brightness analysis) when sample plays
           startBrightnessAnalysis();
           source.onended = () => {
             setIsPlayingSample(false);
             sampleAudioRef.current = null;
             stopBrightnessAnalysis();
+            try { showVisualizerTextRef.current = false; } catch (e) {}
             logger.debug('[Sample] Sample playback ended');
           };
         } catch (err) {
@@ -221,6 +222,7 @@ export default function AudioChatClean() {
             sampleAudioRef.current.disconnect();
             sampleAudioRef.current = null;
           }
+          try { showVisualizerTextRef.current = false; } catch (e) {}
           stopBrightnessAnalysis();
           setIsPlayingSample(false);
           // Clear visualizer text and reset to idle state
@@ -239,6 +241,8 @@ export default function AudioChatClean() {
   const activeBufferSrcRef = useRef<AudioBufferSourceNode | null>(null);
   // Track when we're playing assistant TTS so we can ignore mic transcripts
   const isPlayingTTSRef = useRef<boolean>(false);
+  // Only show visualizer text once audio playback actually starts
+  const showVisualizerTextRef = useRef<boolean>(false);
   // Track mic mute state before TTS so we can restore it after playback
   const micMutedBeforeTTSRef = useRef<boolean | null>(null);
   // Additional audio routing refs / state
@@ -680,14 +684,78 @@ export default function AudioChatClean() {
           // Decode audio
           let decoded = await ac.decodeAudioData(audioData.slice(0));
           
-          // Calculate text display speed based on audio duration
-          const audioDurationSecs = decoded.duration;
-          const wordCount = text.split(/\s+/).length;
-          if (audioDurationSecs > 0 && wordCount > 0) {
-            // Calculate milliseconds per word to fit the audio duration
-            const msPerWord = Math.max(100, (audioDurationSecs * 1000) / wordCount) - 10; // subtract 50ms for faster display
+          // Improved text display speed calculation:
+          // 1) Estimate the non-silent portion of the decoded buffer (trim leading/trailing silence)
+          // 2) Compute base ms/word from non-silent duration
+          // 3) Apply a small slow-down multiplier so text doesn't run ahead of audio
+          // 4) Add a small average punctuation pause per word
+          try {
+            const wordCount = Math.max(1, text.split(/\s+/).filter(w => w.length>0).length);
+            let nonSilentDurationSecs = decoded.duration;
+
+            try {
+              const sampleRate = decoded.sampleRate || ac.sampleRate || 16000;
+              const chan = decoded.numberOfChannels > 0 ? decoded.getChannelData(0) : null;
+              if (chan && chan.length > 0) {
+                const windowSize = Math.max(256, Math.floor(sampleRate * 0.02)); // 20ms window
+                const rmsThreshold = 0.0015; // tuned threshold for typical TTS output
+                let startIndex = 0;
+                let endIndex = chan.length;
+
+                // find start
+                for (let i = 0; i < chan.length; i += windowSize) {
+                  let s = 0;
+                  const end = Math.min(i + windowSize, chan.length);
+                  for (let j = i; j < end; j++) { const v = chan[j]; s += v * v; }
+                  const rms = Math.sqrt(s / (end - i));
+                  if (rms > rmsThreshold) { startIndex = i; break; }
+                }
+                // find end
+                for (let i = chan.length - windowSize; i > 0; i -= windowSize) {
+                  let s = 0;
+                  const start = Math.max(0, i);
+                  for (let j = start; j < Math.min(start + windowSize, chan.length); j++) { const v = chan[j]; s += v * v; }
+                  const rms = Math.sqrt(s / Math.min(windowSize, chan.length - start));
+                  if (rms > rmsThreshold) { endIndex = Math.min(chan.length, i + windowSize); break; }
+                }
+
+                nonSilentDurationSecs = Math.max(0, (endIndex - startIndex) / sampleRate);
+                // fallback: if nonSilentDuration seems too small, use decoded.duration
+                if (nonSilentDurationSecs < 0.05) nonSilentDurationSecs = decoded.duration;
+              }
+            } catch (e) {
+              // If any analysis fails, fallback to full duration
+              nonSilentDurationSecs = decoded.duration;
+            }
+
+            // base ms/word from speech-only portion
+            const baseMsPerWord = (nonSilentDurationSecs * 1000) / wordCount;
+            // Scale safety multiplier based on voice speed setting so text stays in sync
+            // Baseline: when voiceSettings.speed === 0.85 we want multiplier ~= 1
+            const speedBaseline = 0.85;
+            const rawMultiplier = speedBaseline / (voiceSettings?.speed || speedBaseline);
+            // Clamp to reasonable bounds to avoid extreme slow/fast text
+            const safetyMultiplier = Math.min(Math.max(rawMultiplier, 0.7), 1.2);
+            let msPerWord = Math.max(80, baseMsPerWord * safetyMultiplier);
+
+            // Add small average punctuation pause (distribute extra ms across words)
+            const punctCount = (text.match(/[.,!?;:\u2014\u2013]/g) || []).length;
+            if (punctCount > 0) {
+              const extraPerPunct = 140; // ms added for each punctuation (approx pause length)
+              const avgPunctExtra = (punctCount * extraPerPunct) / Math.max(1, wordCount);
+              msPerWord += avgPunctExtra;
+            }
+
+            // Clamp to reasonable bounds
+            msPerWord = Math.min(Math.max(msPerWord, 60), 3000);
             setTextDisplaySpeed(msPerWord);
-            logger.debug('[TTS]', voice.name, 'audio duration:', audioDurationSecs.toFixed(2), 'secs,', wordCount, 'words, calculated speed:', msPerWord.toFixed(0), 'ms/word');
+            logger.debug('[TTS] Improved text speed:', voice.name, 'nonSilentSecs:', nonSilentDurationSecs.toFixed(2), 'words:', wordCount, 'ms/word:', Math.round(msPerWord));
+          } catch (e) {
+            // fallback to original simple method if anything goes wrong
+            const audioDurationSecs = decoded.duration;
+            const wordCount = Math.max(1, text.split(/\s+/).length);
+            const msPerWord = Math.max(100, (audioDurationSecs * 1000) / wordCount);
+            setTextDisplaySpeed(msPerWord);
           }
           
           // Convert mono to stereo if needed
@@ -749,6 +817,7 @@ export default function AudioChatClean() {
                     stopBrightnessAnalysis();
                     logger.debug('[TTS] Delay echoes faded, brightness analysis stopped');
                     try { isPlayingTTSRef.current = false; } catch (e) {}
+                    try { showVisualizerTextRef.current = false; } catch (e) {}
                     restoreMicState();
                   }
                 } else {
@@ -765,6 +834,7 @@ export default function AudioChatClean() {
                 stopBrightnessAnalysis();
                 logger.debug('[TTS] Brightness analysis stopped by failsafe timeout');
                 try { isPlayingTTSRef.current = false; } catch (e) {}
+                try { showVisualizerTextRef.current = false; } catch (e) {}
                 restoreMicState();
               }, maxWaitTime);
             }
@@ -772,12 +842,13 @@ export default function AudioChatClean() {
           
           logger.debug('[TTS]', voice.name, 'playback started on channel');
           
-        } catch (err) {
+          } catch (err) {
           logger.error('[TTS] Error playing voice', voice.name, err);
           activeCount--;
           if (activeCount === 0) {
             stopBrightnessAnalysis();
             try { isPlayingTTSRef.current = false; } catch (e) {}
+            try { showVisualizerTextRef.current = false; } catch (e) {}
             restoreMicState();
           }
         }
@@ -788,6 +859,13 @@ export default function AudioChatClean() {
       
       // Start brightness analysis after voices are playing
       startBrightnessAnalysis();
+
+      // Show visualizer text now that audio playback has started
+      try {
+        showVisualizerTextRef.current = true;
+        const curText = assistantResponseRef.current || text || "";
+        if (curText) addAssistantText(curText, true);
+      } catch (e) {}
       
       // Update voice channels state for UI
       if (audioMixerRef.current) {
@@ -1405,7 +1483,9 @@ export default function AudioChatClean() {
     assistantResponseRef.current = next;
     setAssistantResponse(next);
     // Send to visualizer (partial while streaming, final when done)
-    addAssistantText(next, !done);
+    if (showVisualizerTextRef.current) {
+      addAssistantText(next, !done);
+    }
     // If done, push to transcript history and play TTS
     if (done && next.trim()) {
       setTranscriptHistory((h) => [...h, { role: "assistant", text: next.trim() }]);
