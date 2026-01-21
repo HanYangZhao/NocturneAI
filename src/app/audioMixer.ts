@@ -70,7 +70,8 @@ export class AudioMixer {
   playOnChannel(
     channelId: string,
     buffer: AudioBuffer,
-    onEnded?: () => void
+    onEnded?: () => void,
+    startAt?: number
   ): AudioBufferSourceNode {
     const channel = this.channels.get(channelId);
     if (!channel) {
@@ -101,7 +102,11 @@ export class AudioMixer {
     };
 
     channel.activeSource = source;
-    source.start();
+    if (typeof startAt === 'number') {
+      try { source.start(startAt); } catch (e) { source.start(); }
+    } else {
+      source.start();
+    }
 
     return source;
   }

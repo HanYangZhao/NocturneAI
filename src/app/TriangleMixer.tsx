@@ -9,7 +9,7 @@ interface TriangleMixerProps {
     enabled: boolean;
     elevenLabsVoiceId?: string;
   }>;
-  onMixChange: (mix: { [voiceId: string]: number }) => void;
+  onMixChange: (mix: { [voiceId: string]: number } | { volumes: { [voiceId: string]: number }, masterScale: number }) => void;
   onToggleVoice?: (voiceId: string) => void;
   isAudioPlaying?: boolean;
   settings?: React.ReactNode;
@@ -26,8 +26,17 @@ export default function TriangleMixer({ voices, onMixChange, onToggleVoice, isAu
   const [position, setPosition] = useState({ x: 0.5, y: 0.5 }); // Normalized 0-1
   const [isAnimating, setIsAnimating] = useState(false);
   const [rotationDuration, setRotationDuration] = useState(10); // seconds for full rotation
+  const [randomMode, setRandomMode] = useState(false);
   const animationStartTime = useRef<number>(0);
   const animationFrameId = useRef<number | null>(null);
+  const prevAngleRef = useRef<number>(0);
+  const targetAngleRef = useRef<number>(0);
+  const segmentStartRef = useRef<number>(0);
+  const segmentDurationRef = useRef<number>(1);
+  const prevRadiusRef = useRef<number>(1);
+  const targetRadiusRef = useRef<number>(1);
+  const prevPosRef = useRef<{ x: number; y: number }>({ x: 0.5, y: 0.5 });
+  const targetPosRef = useRef<{ x: number; y: number }>({ x: 0.5, y: 0.5 });
   
   const size = 220;
   const radius = size / 2;
@@ -289,26 +298,82 @@ export default function TriangleMixer({ voices, onMixChange, onToggleVoice, isAu
       return;
     }
 
+    // Start animation loop. Supports two modes:
+    // - linear rotation (previous behavior)
+    // - random mode: smoothly interpolate between random target points inside the circle
     animationStartTime.current = Date.now();
 
+    // initialize refs from current position
+    const cx = (position.x - 0.5) * 2;
+    const cy = (position.y - 0.5) * 2;
+    let startAngle = Math.atan2(cy, cx);
+    if (isNaN(startAngle)) startAngle = 0;
+    if (startAngle < 0) startAngle += 2 * Math.PI;
+    prevAngleRef.current = startAngle;
+    const startRadius = Math.min(Math.sqrt(cx * cx + cy * cy), 1) || 0;
+    prevRadiusRef.current = startRadius;
+    prevPosRef.current = { x: position.x, y: position.y };
+    targetPosRef.current = { x: position.x, y: position.y };
+
+    const pickNewTarget = () => {
+      // pick a random point inside a circle uniformly
+      const a = Math.random() * 2 * Math.PI;
+      const r = Math.sqrt(Math.random()); // sqrt for uniform area
+      const tx = 0.5 + Math.cos(a) * r * 0.5;
+      const ty = 0.5 + Math.sin(a) * r * 0.5;
+      targetPosRef.current = { x: tx, y: ty };
+      segmentStartRef.current = Date.now();
+      // segment duration scales with rotationDuration so slider controls speed
+      // choose between 25% and 100% of rotationDuration to give some variation
+      const secs = Math.max(0.25, rotationDuration * (0.25 + Math.random() * 0.75));
+      segmentDurationRef.current = secs * 1000;
+    };
+
     const animate = () => {
-      const elapsed = (Date.now() - animationStartTime.current) / 1000; // seconds
-      const progress = (elapsed % rotationDuration) / rotationDuration; // 0 to 1
-      
-      // Calculate angle for current progress (full circle = 2π)
-      const angle = progress * 2 * Math.PI;
-      
-      // Convert angle to position on circle edge (1.0 = exactly on the edge)
-      const distanceFromCenter = 1.0;
-      const x = 0.5 + Math.cos(angle) * distanceFromCenter * 0.5;
-      const y = 0.5 + Math.sin(angle) * distanceFromCenter * 0.5;
-      
-      setPosition({ x, y });
-      
-      // Calculate and emit mix
-      const mix = calculateMix(x, y);
-      onMixChange(mix);
-      
+      if (!randomMode) {
+        const elapsed = (Date.now() - animationStartTime.current) / 1000; // seconds
+        const progress = (elapsed % rotationDuration) / rotationDuration; // 0 to 1
+
+        // Calculate angle for current progress (full circle = 2π)
+        const angle = progress * 2 * Math.PI;
+
+        // Convert angle to position on circle edge (1.0 = exactly on the edge)
+        const distanceFromCenter = 1.0;
+        const x = 0.5 + Math.cos(angle) * distanceFromCenter * 0.5;
+        const y = 0.5 + Math.sin(angle) * distanceFromCenter * 0.5;
+
+        setPosition({ x, y });
+
+        // Calculate and emit mix
+        const mix = calculateMix(x, y);
+        onMixChange(mix);
+      } else {
+        // Random smooth interpolation between previous and target positions (Cartesian)
+        const now = Date.now();
+        const segStart = segmentStartRef.current;
+        const segDur = Math.max(1, segmentDurationRef.current);
+        const t = Math.min(1, (now - segStart) / segDur);
+        // smoothstep easing
+        const tt = t * t * (3 - 2 * t);
+
+        const p0 = prevPosRef.current;
+        const p1 = targetPosRef.current;
+        const x = p0.x + (p1.x - p0.x) * tt;
+        const y = p0.y + (p1.y - p0.y) * tt;
+
+        setPosition({ x, y });
+
+        // Calculate and emit mix
+        const mix = calculateMix(x, y);
+        onMixChange(mix);
+
+        if (t >= 1) {
+          // move to next segment
+          prevPosRef.current = { ...targetPosRef.current };
+          pickNewTarget();
+        }
+      }
+
       animationFrameId.current = requestAnimationFrame(animate);
     };
 
@@ -319,7 +384,7 @@ export default function TriangleMixer({ voices, onMixChange, onToggleVoice, isAu
         cancelAnimationFrame(animationFrameId.current);
       }
     };
-  }, [isAnimating, rotationDuration]);
+  }, [isAnimating, rotationDuration, randomMode]);
 
   const toggleAnimation = () => {
     setIsAnimating(!isAnimating);
@@ -372,16 +437,25 @@ export default function TriangleMixer({ voices, onMixChange, onToggleVoice, isAu
         <div className="mt-3 w-full max-w-[300px] p-2 border rounded bg-gray-50">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium">Auto-Crossfade</span>
-            <button
-              onClick={toggleAnimation}
-              className={`text-xs px-3 py-1 rounded font-medium transition-colors ${
-                isAnimating 
-                  ? 'bg-red-500 text-white hover:bg-red-600' 
-                  : 'bg-blue-500 text-white hover:bg-blue-600'
-              }`}
-            >
-              {isAnimating ? '⏸ Stop' : '▶ Start'}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={toggleAnimation}
+                className={`text-xs px-3 py-1 rounded font-medium transition-colors ${
+                  isAnimating 
+                    ? 'bg-red-500 text-white hover:bg-red-600' 
+                    : 'bg-blue-500 text-white hover:bg-blue-600'
+                }`}
+              >
+                {isAnimating ? '⏸ Stop' : '▶ Start'}
+              </button>
+              <button
+                onClick={() => setRandomMode(r => !r)}
+                className={`text-xs px-2 py-1 rounded font-medium border ${randomMode ? 'bg-red-500 text-white' : 'bg-white text-gray-700'}`}
+                title="Toggle random auto-crossfade mode"
+              >
+                {randomMode ? 'Random' : 'Linear'}
+              </button>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <label className="text-xs text-gray-600 whitespace-nowrap">Duration:</label>
