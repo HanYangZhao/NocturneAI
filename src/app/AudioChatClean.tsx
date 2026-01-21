@@ -648,7 +648,7 @@ export default function AudioChatClean() {
       // Track active playback count
       let activeCount = enabledVoices.length;
       
-      // Make concurrent requests for all enabled voices
+      // Make concurrent requests for all enabled voices and decode buffers
       const voicePlaybackPromises = enabledVoices.map(async (voice) => {
         try {
           logger.debug('[TTS] Requesting audio for voice:', voice.name, voice.id);
@@ -769,47 +769,62 @@ export default function AudioChatClean() {
             logger.debug('[TTS]', voice.name, 'converted mono to stereo');
           }
           
-          // Get or create channel for this voice
-          const channel = audioMixerRef.current!.getOrCreateChannel(
-            voice.id,
-            voice.name,
-            voice.defaultVolume
-          );
-          
-          // Play directly on channel - effects are applied to the mixed output
+          // Return decoded buffer so we can schedule simultaneous playback
+          return { voice, decoded };
+        } catch (e) {
+          logger.warn('[TTS] Voice processing failed for', voice.name, e);
+          return null;
+        }
+      });
+
+      // Wait for all requests/decodes to complete
+      const decodedResults = (await Promise.all(voicePlaybackPromises)).filter(Boolean) as Array<{ voice: any; decoded: AudioBuffer }>;
+      if (decodedResults.length === 0) {
+        logger.warn('[TTS] No decoded buffers available, aborting playback');
+        restoreMicState();
+        return;
+      }
+
+      // Ensure channels exist for each voice
+      for (const { voice } of decodedResults) {
+        audioMixerRef.current!.getOrCreateChannel(voice.id, voice.name, voice.defaultVolume);
+      }
+
+      // Schedule simultaneous playback slightly in the future to allow nodes to be prepared
+      const startTime = ac.currentTime + 0.1; // 100ms latency to schedule
+
+      // Start all channels at the same scheduled time
+      decodedResults.forEach(({ voice, decoded }) => {
+        try {
           audioMixerRef.current!.playOnChannel(voice.id, decoded, () => {
             activeCount--;
             logger.debug('[TTS]', voice.name, 'playback ended. Active:', activeCount);
             if (activeCount === 0) {
               logger.debug('[TTS] All voices finished, waiting for delay echoes to fade before stopping brightness');
-              
+
               // Calculate timeout based on delay effect - if delay is active, wait longer
               let maxWaitTime = 10000; // Default 10 seconds
               const delayEffect = effectsList.find(f => f.type === 'Delay' && !f.bypass);
               if (delayEffect && delayEffect.params?.delayTime) {
-                // Wait for at least delay time + feedback decay time
-                // feedback creates repeats, so add extra time for them to decay
                 const delayTime = delayEffect.params.delayTime || 100;
                 const feedback = delayEffect.params.feedback || 0.45;
-                // Calculate decay time: with feedback 0.45, need ~5 repeats to become inaudible
-                // Each repeat takes delayTime, so total is roughly 5 * delayTime
                 const decayTime = Math.ceil(5 * delayTime);
-                maxWaitTime = Math.max(10000, decayTime + 2000); // At least 10 seconds, or delay decay + 2s buffer
+                maxWaitTime = Math.max(10000, decayTime + 2000);
                 logger.debug('[TTS] Extended wait time for long delay:', maxWaitTime, 'ms (delayTime:', delayTime, 'feedback:', feedback, ')');
               }
-              
+
               // Don't stop brightness immediately - wait for delay echoes to finish
-              // Check brightness every 100ms and stop when it's been low for 1000ms (increased from 500ms)
+              // Check brightness every 100ms and stop when it's been low for 2000ms
               let lowBrightnessCount = 0;
               let fadeCheckInterval: NodeJS.Timeout | null = setInterval(() => {
                 const currentBrightness = Math.max(
                   transientAnalyzerRef.current?.getBrightness() || 0,
                   outputAnalyzerRef.current?.getBrightness() || 0
                 );
-                
+
                 if (currentBrightness < 0.05) {
                   lowBrightnessCount++;
-                  if (lowBrightnessCount >= 20) { // 2000ms of low brightness (was 500ms)
+                  if (lowBrightnessCount >= 20) { // 2000ms of low brightness
                     if (fadeCheckInterval) {
                       clearInterval(fadeCheckInterval);
                       fadeCheckInterval = null;
@@ -821,10 +836,10 @@ export default function AudioChatClean() {
                     restoreMicState();
                   }
                 } else {
-                  lowBrightnessCount = 0; // Reset if brightness spikes again
+                  lowBrightnessCount = 0;
                 }
               }, 100);
-              
+
               // Failsafe: force stop after calculated timeout
               let failsafeTimeout: NodeJS.Timeout | null = setTimeout(() => {
                 if (fadeCheckInterval) {
@@ -838,11 +853,10 @@ export default function AudioChatClean() {
                 restoreMicState();
               }, maxWaitTime);
             }
-          });
-          
+          }, startTime);
+
           logger.debug('[TTS]', voice.name, 'playback started on channel');
-          
-          } catch (err) {
+        } catch (err) {
           logger.error('[TTS] Error playing voice', voice.name, err);
           activeCount--;
           if (activeCount === 0) {
