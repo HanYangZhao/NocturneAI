@@ -1657,12 +1657,21 @@ export default function AudioChatClean() {
                       voices={voices}
                       isAudioPlaying={isAudioPlaying}
                       onMixChange={(mix) => {
-                        if (audioMixerRef.current) {
-                          Object.entries(mix).forEach(([voiceId, volume]) => {
-                            audioMixerRef.current!.setChannelVolume(voiceId, volume);
-                          });
-                          setVoiceChannels(audioMixerRef.current.getChannels());
+                        if (!audioMixerRef.current) return;
+
+                        // Support both legacy mapping { id: volume } and new { volumes: { id: volume }, masterScale }
+                        let volumes: any = mix as any;
+                        let masterScale = 1;
+                        if (mix && typeof (mix as any) === 'object' && (mix as any).volumes) {
+                          volumes = (mix as any).volumes;
+                          masterScale = (typeof (mix as any).masterScale === 'number') ? (mix as any).masterScale : 1;
                         }
+
+                        Object.entries(volumes).forEach(([voiceId, volume]) => {
+                          const v = Math.max(0, Math.min(1, (volume as number) * masterScale));
+                          audioMixerRef.current!.setChannelVolume(voiceId, v);
+                        });
+                        setVoiceChannels(audioMixerRef.current.getChannels());
                       }}
                       onToggleVoice={toggleVoiceEnabled}
                       settings={(

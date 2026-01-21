@@ -47,7 +47,7 @@ const defaultParamsByType: Record<string, any> = {
   Chorus: { rate: 1.5, feedback: 0.4, depth: 0.7, delay: 0.0045, bypass: false },
   Overdrive: { outputGain: -9.154, drive: 0.197, curve: 0.979, algorithmIndex: 0, bypass: false },
   RingModulator: { frequency: 30, depth: 1, bufferSize: 4096, bypass: false },
-  Volume: { volume: 0.65 },
+  Volume: { volume: 0.2 },
 };
 
 export function createEffect(id: string, type: string, params?: any) {

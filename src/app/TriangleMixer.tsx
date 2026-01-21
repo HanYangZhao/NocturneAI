@@ -51,12 +51,12 @@ export default function TriangleMixer({ voices, onMixChange, onToggleVoice, isAu
   }, [size]);
 
   // Calculate voice volumes based on position using barycentric-like coordinates
-  const calculateMix = (x: number, y: number): { [key: string]: number } => {
+  const calculateMix = (x: number, y: number): { volumes: { [key: string]: number }, masterScale: number } => {
     const enabledVoices = voices.filter(v => v.enabled && v.elevenLabsVoiceId);
     const numVoices = enabledVoices.length;
     
-    if (numVoices === 0) return {};
-    if (numVoices === 1) return { [enabledVoices[0].id]: 1.0 };
+    if (numVoices === 0) return { volumes: {}, masterScale: 1.0 };
+    if (numVoices === 1) return { volumes: { [enabledVoices[0].id]: 1.0 }, masterScale: 1.0 };
     
     // Convert normalized coordinates to centered coordinates (-1 to 1)
     const cx = (x - 0.5) * 2;
@@ -98,12 +98,17 @@ export default function TriangleMixer({ voices, onMixChange, onToggleVoice, isAu
     const normalizedMixes = mixes.map(mix => mix / total);
     
     // Build result object
-    const result: { [key: string]: number } = {};
+    const volumes: { [key: string]: number } = {};
     enabledVoices.forEach((voice, idx) => {
-      result[voice.id] = normalizedMixes[idx];
+      volumes[voice.id] = normalizedMixes[idx];
     });
-    
-    return result;
+
+    // Compute a conservative masterScale to reduce overall loudness near edges.
+    // At center (distanceFactor=0) => scale=1.0. At edge (distanceFactor=1) => scale=0.75
+    const attenuationRange = 0.25; // how much to reduce at full edge (25%)
+    const masterScale = Math.max(0.01, 1 - attenuationRange * distanceFactor);
+
+    return { volumes, masterScale };
   };
 
   // Draw the mixer visualization
@@ -397,7 +402,8 @@ export default function TriangleMixer({ voices, onMixChange, onToggleVoice, isAu
         {/* Show current mix percentages */}
         <div className="mt-2 flex gap-3 text-xs flex-wrap justify-center">
           {voices.filter(v => v.enabled && v.elevenLabsVoiceId).map((voice, idx) => {
-            const mix = calculateMix(position.x, position.y);
+            const mixObj = calculateMix(position.x, position.y);
+            const mix = mixObj?.volumes || {};
             const percentage = Math.round((mix[voice.id] || 0) * 100);
             const colors = ["text-red-600", "text-blue-600", "text-green-600", "text-yellow-600", "text-purple-600", "text-pink-600"];
             return (
